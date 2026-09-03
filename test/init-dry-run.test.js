@@ -5,14 +5,13 @@ const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
 const { cmdInit } = require("../src/commands/init");
-const { resolveOpencodePluginDir, DEFAULT_PLUGIN_NAME } = require("../src/lib/opencode-config");
 const { withHome } = require("./helpers/with-home");
 
 function stripAnsi(text) {
   return String(text || "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 
-test("dry-run preview reports opencode install when config is missing", async () => {
+test("dry-run reports that integrations are managed from the Dashboard", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-dry-"));
   let restoreHome = () => {};
   const prevOpencodeConfigDir = process.env.OPENCODE_CONFIG_DIR;
@@ -41,14 +40,9 @@ test("dry-run preview reports opencode install when config is missing", async ()
     ]);
 
     const clean = stripAnsi(output);
-    assert.match(clean, /Opencode Plugin/);
-    assert.match(clean, /Will create config and install plugin/);
-
-    const pluginPath = path.join(
-      resolveOpencodePluginDir({ configDir: process.env.OPENCODE_CONFIG_DIR }),
-      DEFAULT_PLUGIN_NAME,
-    );
-    await assert.rejects(fs.stat(pluginPath), /ENOENT/);
+    assert.match(clean, /AI tool integrations/);
+    assert.match(clean, /Manage hooks and plugins from the local Dashboard/);
+    await assert.rejects(fs.stat(process.env.OPENCODE_CONFIG_DIR), /ENOENT/);
   } finally {
     process.stdout.write = prevWrite;
     restoreHome();

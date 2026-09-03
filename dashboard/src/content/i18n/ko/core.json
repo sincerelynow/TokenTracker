@@ -566,5 +566,22 @@
   "settings.section.labs": "Labs",
   "limits.alert.blocked": "알림이 꺼져 있음 — 시스템 설정에서 허용하세요",
   "settings.limits.showSubscriptions": "구독을 한도에 표시",
-  "settings.limits.showSubscriptionsHint": "수동으로 등록한 구독 갱신 바를 한도와 함께 표시합니다."
+  "settings.limits.showSubscriptionsHint": "수동으로 등록한 구독 갱신 바를 한도와 함께 표시합니다.",
+  "settings.section.integrations": "통합",
+  "settings.integrations.title": "AI 도구 통합",
+  "settings.integrations.subtitle": "여기에서 작업을 선택할 때만 훅 또는 플러그인을 변경합니다.",
+  "settings.integrations.install": "설치",
+  "settings.integrations.uninstall": "제거",
+  "settings.integrations.cancel": "취소",
+  "settings.integrations.working": "처리 중...",
+  "settings.integrations.status.installed": "설치됨",
+  "settings.integrations.status.available": "사용 가능",
+  "settings.integrations.status.not_detected": "감지되지 않음",
+  "settings.integrations.error": "통합 작업 실패: {{error}}",
+  "settings.integrations.sync_now": "지금 통계",
+  "settings.integrations.syncing": "통계 중...",
+  "settings.integrations.sync_success": "통계가 최신 상태입니다.",
+  "settings.integrations.sync_error": "통계 동기화 실패: {{error}}",
+  "settings.integrations.confirm.title": "통합을 제거할까요?",
+  "settings.integrations.confirm.description": "{{provider}}에서 TokenTracker가 관리하는 통합을 제거할까요? 다른 설정은 유지됩니다."
 }

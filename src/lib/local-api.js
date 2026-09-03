@@ -1193,7 +1193,7 @@ function createLocalApiHandler({ queuePath }) {
       // we only remove it if we have it.
       const lower = raw.toLowerCase();
       const isDeletion = lower.includes("max-age=0") || lower.includes("expires=thu, 01 jan 1970");
-      
+
       if (isDeletion) {
         if (relayCookies.has(name)) {
           relayCookies.delete(name);
@@ -1992,6 +1992,48 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- AI tool integrations (local Dashboard only) ---
+    if (p === "/functions/tokentracker-integrations") {
+      const method = String(req.method || "GET").toUpperCase();
+      const manager = require("./integration-manager");
+      if (method === "GET") {
+        json(res, { integrations: await manager.listIntegrations() });
+        return true;
+      }
+      if (method === "POST") {
+        if (!isAuthorizedLocalMutation(req)) {
+          json(res, { ok: false, error: "Unauthorized" }, 401);
+          return true;
+        }
+        let body;
+        try {
+          body = await readJsonBody(req);
+        } catch (_error) {
+          json(res, { ok: false, error: "invalid JSON" }, 400);
+          return true;
+        }
+        const provider = typeof body?.provider === "string" ? body.provider.trim() : "";
+        const action = typeof body?.action === "string" ? body.action.trim() : "";
+        try {
+          const result = await manager.mutateIntegration(provider, action);
+          json(res, { ok: true, ...result });
+        } catch (error) {
+          const badInput = error?.code === "INTEGRATION_NOT_FOUND"
+            || error?.code === "INTEGRATION_ACTION_INVALID"
+            || error?.code === "INTEGRATION_NOT_DETECTED"
+            || error?.code === "INTEGRATION_NOT_ACTIONABLE";
+          json(res, {
+            ok: false,
+            error: error?.message || "Integration operation failed",
+            code: error?.code || "INTEGRATION_OPERATION_FAILED",
+          }, badInput ? 400 : 500);
+        }
+        return true;
+      }
+      json(res, { ok: false, error: "Method Not Allowed" }, 405);
+      return true;
+    }
+
     // --- wrapped (year-end summary, à la Spotify Wrapped) ---
     if (p === "/functions/tokentracker-wrapped") {
       const yearParam = url.searchParams.get("year");
@@ -2241,14 +2283,14 @@ function createLocalApiHandler({ queuePath }) {
         }
       }
 
-      json(res, { 
-        from, 
-        to, 
-        scope, 
-        excluded_sources: excludedSources, 
-        week_starts_on: "sun", 
-        active_days: cells.filter((c) => c.billable_total_tokens > 0).length, 
-        streak_days: 0, 
+      json(res, {
+        from,
+        to,
+        scope,
+        excluded_sources: excludedSources,
+        week_starts_on: "sun",
+        active_days: cells.filter((c) => c.billable_total_tokens > 0).length,
+        streak_days: 0,
         weeks: weeksArr,
         total_cost_usd: totalCostUsd
       });

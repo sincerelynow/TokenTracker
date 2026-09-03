@@ -45,7 +45,7 @@
 npx tokentracker-cli
 ```
 
-끝입니다. 첫 실행에서 hook을 설치하고, 데이터를 동기화한 뒤 `http://localhost:7680`에 대시보드를 엽니다.
+끝입니다. 첫 실행에서 데이터를 동기화한 뒤 `http://localhost:7680`에 대시보드를 엽니다. 선택적 hook과 플러그인은 **설정 → 통합**에서 수동으로 관리합니다.
 
 **30초 안에 얻는 것:**
 - 📊 사용 추세, 모델별 분석, 비용 분석을 보여주는 `localhost:7680`의 로컬 대시보드
@@ -90,7 +90,8 @@ brew install xiufengsun/tokentracker/tokentracker
 
 - 🔌 **34개의 AI 도구 기본 지원** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Dots, Prime Agent, Craft Agents, Reasonix, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science, DeepSeek Harness,TRAE Work CN
 - 🏠 **100% 로컬** — 토큰 데이터가 기기를 떠나지 않습니다. 계정 없음, API Key 없음.
-- 🚀 **제로 설정** — 첫 실행 시 Hook 자동 설치. 0에서 대시보드까지 30초.
+- 🚀 **시작 시 설정 변경 없음** — 첫 실행은 AI 도구 설정을 변경하지 않으며 선택적 통합은 대시보드에서 관리합니다.
+- 🔄 **정기 통계** — CLI `serve`가 5분마다 로컬 소스를 새로 고치며 설정 → 통합에서 즉시 통계도 실행할 수 있습니다.
 - 📊 **아름다운 대시보드** — 사용 추세, 모델별 비용 분석, GitHub 스타일 활동 히트맵, 프로젝트 귀속 정보
 - 🖥️ **네이티브 데스크톱 앱** — macOS 메뉴바(위젯 포함)와 Windows 시스템 트레이. 각각 임베디드 서버와 네이티브 WebView 대시보드를 제공합니다
 - 🎨 **4종 데스크톱 위젯** — Pin Usage / Activity Heatmap / Top Models / Usage Limits를 데스크톱에 고정
@@ -165,22 +166,22 @@ brew install xiufengsun/tokentracker/tokentracker
 
 | 도구 | 감지 | 방식 |
 |---|---|---|
-| **Claude Code** | ✅ 자동 | `settings.json`의 SessionEnd hook |
-| **Codex CLI** | ✅ 자동 | `config.toml`의 TOML notify hook |
+| **Claude Code** | 수동 | `settings.json`의 SessionEnd hook |
+| **Codex CLI** | 수동 | `config.toml`의 TOML notify hook |
 | **Cursor** | ✅ 자동 | API + SQLite 인증 토큰 |
 | **Kiro** | ✅ 자동 | SQLite + JSONL 하이브리드 |
-| **Gemini CLI** | ✅ 자동 | SessionEnd hook |
-| **OpenCode** | ✅ 자동 | 플러그인 시스템 + SQLite |
-| **OpenClaw** | ✅ 자동 | 세션 플러그인 |
-| **Every Code** | ✅ 자동 | TOML notify hook |
+| **Gemini CLI** | 수동 | SessionEnd hook |
+| **OpenCode** | 수동 | 플러그인 시스템 + SQLite |
+| **OpenClaw** | 수동 | 세션 플러그인 |
+| **Every Code** | 수동 | TOML notify hook |
 | **Hermes Agent** | ✅ 자동 | SQLite sessions 테이블 (`~/.hermes/state.db`) |
 | **GitHub Copilot App / CLI** | ✅ 자동 | 요청별 통합 SQLite 사용량 (`~/.copilot/session-store.db`), App DB는 레거시 기준선 |
 | **GitHub Copilot Chat 확장 / 이전 CLI** | ✅ 자동 | OpenTelemetry 파일 익스포터 (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ 자동 | 패시브 `wire.jsonl` 리더 (`~/.kimi/sessions/**/wire.jsonl`) |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 자동 | 패시브 리더 (`~/.omp/agent/sessions/**/*.jsonl`) |
-| **CodeBuddy** (Tencent) | ✅ 자동 | `~/.codebuddy/settings.json`의 SessionEnd hook (Claude-Code fork) |
-| **WorkBuddy** (Tencent) | ✅ 자동 | `~/.workbuddy/settings.json`의 SessionEnd hook (Claude-Code fork) + 패시브 `projects/**/*.jsonl` 스캔 |
-| **Grok Build** (xAI) | ✅ 자동 | SessionEnd hook + 패시브 `updates.jsonl` / `signals.json` 스캔 (`~/.grok/sessions/**/`) |
+| **CodeBuddy** (Tencent) | 수동 | `~/.codebuddy/settings.json`의 SessionEnd hook (Claude-Code fork) |
+| **WorkBuddy** (Tencent) | 수동 | `~/.workbuddy/settings.json`의 SessionEnd hook (Claude-Code fork) + 패시브 `projects/**/*.jsonl` 스캔 |
+| **Grok Build** (xAI) | 수동 | SessionEnd hook + 패시브 `updates.jsonl` / `signals.json` 스캔 (`~/.grok/sessions/**/`) |
 | **Kilo CLI** (kilo.ai) | ✅ 자동 | 패시브 SQLite 리더 (`~/.local/share/kilo/kilo.db`, OpenCode-fork 스키마) |
 | **Kilo Code** (VS Code 확장) | ✅ 자동 | 패시브 `ui_messages.json` 리더 (Cursor/Code/CodeBuddy/Windsurf globalStorage) |
 | **Antigravity** | ✅ 자동 | 패시브 트랜스크립트 리더 (`~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/brain/**/transcript.jsonl`) |
@@ -201,7 +202,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **DeepSeek Harness** | ✅ 자동 | 패시브 세션 리더 (`~/.dsh/sessions/**/session.jsonl[.zstd]`, 세션 헤더와 assistant 이벤트를 파싱하고 멀티 프레임 zstd 압축 해제를 지원) |
 | **TRAE Work CN** | ✅ 자동 | **명시적인 옵트인이 필요합니다: `TOKENTRACKER_TRAE_CN_USAGE=1` 을 설정하세요.** 사용량을 읽으면 로컬에 저장된 로그인 인증이 TRAE의 내부 API로 전송되므로, 켜기 전에는 아무것도 전송되지 않습니다. 켠 뒤에는: 로컬 TRAE Work CN 인증이 있을 때 실행 가능한 비백그라운드 동기화 중에 macOS의 로그인된 앱에서 session-token 사용량을 읽습니다. 내부 API는 변경될 수 있습니다 |
 
-> **플러그인이나 hook을 수동으로 설치해야 하나요?** 아니요. `tokentracker` (또는 `tokentracker init`)가 첫 실행에서 모든 것을 처리합니다:
+> **플러그인이나 hook은 어떻게 관리하나요?** 로컬 대시보드의 **설정 → 통합**을 사용합니다. 시작 및 초기화 시 AI 도구 설정을 변경하지 않습니다:
 > - **Hook 기반** 도구 (Claude Code, Codex, Gemini, Every Code, **CodeBuddy**, **WorkBuddy**, **Grok Build**) — 도구 자체의 설정에 SessionEnd hook 또는 TOML notify 엔트리를 작성합니다.
 > - **플러그인 기반** 도구 (OpenCode, **OpenClaw**) — 플러그인은 npm 패키지 안에 포함되어 있습니다. OpenClaw 세션 플러그인은 `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/`에 있으며, OpenClaw 자체 CLI로 링크하고 활성화한 뒤 동기화를 트리거하는 세션 종료 이벤트를 허용하도록 `hooks.allowConversationAccess=true`를 설정합니다. 다운로드, 드래그 앤 드롭 불필요.
 > - **패시브 리더** (Cursor, Kiro, Hermes, Kimi Code, Copilot, **Grok Build**, **oh-my-pi**, **pi**, **Craft Agents**, **Reasonix**, **Kilo CLI**, **Kilo Code**, **Roo Code**, **Antigravity**, **Zed Agent**, **Goose**, **Droid**, **Mimo Code**, **ZCode**, **AnythingLLM Desktop**, **Claude Science**, **DeepSeek Harness**) — 이들 도구에는 아무것도 설치하지 않습니다. 도구가 이미 생성하는 파일 (SQLite DB, JSONL, OTEL export, session logs)만 읽습니다. Copilot App / CLI 사용량은 `~/.copilot/session-store.db`에서 요청별로 읽습니다. `data.db`는 레거시 마이그레이션 기준선으로 한 번만 사용하며 store가 정식 소스가 된 뒤에는 관찰 전용으로 유지됩니다. Chat 확장과 이전 CLI는 계속 OTEL을 사용하며, TokenTracker가 겹치는 요청을 한 번만 집계합니다. 마이그레이션 전 혼합 App/CLI 기록에서 모델을 안전하게 분리할 수 없는 잔여분은 추정 모델 대신 `github-copilot-legacy` 집계로 보존합니다.

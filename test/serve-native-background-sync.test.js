@@ -2,8 +2,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-  NATIVE_BACKGROUND_SYNC_INTERVAL_MS,
-  startNativeBackgroundSync,
+  CLI_BACKGROUND_SYNC_INTERVAL_MS,
+  WINDOWS_BACKGROUND_SYNC_INTERVAL_MS,
+  startBackgroundSync,
 } = require("../src/commands/serve");
 
 test("native serve schedules a native-only lightweight all-source fallback sync", async () => {
@@ -12,7 +13,7 @@ test("native serve schedules a native-only lightweight all-source fallback sync"
   let clearedTimer = null;
   const timer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
   const runSync = test.mock.fn(async () => {});
-  const controller = startNativeBackgroundSync({
+  const controller = startBackgroundSync({
     appShell: "windows",
     runSync,
     setIntervalFn(callback, delay) {
@@ -26,7 +27,7 @@ test("native serve schedules a native-only lightweight all-source fallback sync"
   });
 
   assert.ok(controller);
-  assert.equal(intervalDelay, NATIVE_BACKGROUND_SYNC_INTERVAL_MS);
+  assert.equal(intervalDelay, WINDOWS_BACKGROUND_SYNC_INTERVAL_MS);
   assert.equal(timer.unrefCalled, true);
   intervalCallback();
   await new Promise((resolve) => setImmediate(resolve));
@@ -44,12 +45,12 @@ test("native serve schedules a native-only lightweight all-source fallback sync"
   assert.equal(clearedTimer, timer);
 });
 
-test("native background sync coalesces overlapping ticks", async () => {
+test("background sync coalesces overlapping CLI ticks", async () => {
   let resolveSync;
   const errors = [];
   const runSync = test.mock.fn(() => new Promise((resolve) => { resolveSync = resolve; }));
-  const controller = startNativeBackgroundSync({
-    appShell: "windows",
+  const controller = startBackgroundSync({
+    appShell: "",
     runSync,
     setIntervalFn() { return 1; },
     clearIntervalFn() {},
@@ -67,9 +68,35 @@ test("native background sync coalesces overlapping ticks", async () => {
   controller.stop();
 });
 
-test("macOS and non-native serve do not start a duplicate fallback timer", () => {
+test("macOS and Linux shells do not start a duplicate fallback timer", () => {
   const setIntervalFn = test.mock.fn();
-  assert.equal(startNativeBackgroundSync({ appShell: "macos", setIntervalFn }), null);
-  assert.equal(startNativeBackgroundSync({ appShell: "", setIntervalFn }), null);
+  assert.equal(startBackgroundSync({ appShell: "macos", setIntervalFn }), null);
+  assert.equal(startBackgroundSync({ appShell: "linux", setIntervalFn }), null);
   assert.equal(setIntervalFn.mock.callCount(), 0);
+});
+
+test("ordinary CLI serve schedules all local sources every five minutes", async () => {
+  let callback;
+  let delay;
+  const runSync = test.mock.fn(async () => {});
+  const controller = startBackgroundSync({
+    appShell: "",
+    runSync,
+    setIntervalFn(next, nextDelay) {
+      callback = next;
+      delay = nextDelay;
+      return { unref() {} };
+    },
+    clearIntervalFn() {},
+  });
+  assert.equal(delay, CLI_BACKGROUND_SYNC_INTERVAL_MS);
+  callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(runSync.mock.calls[0].arguments[0], [
+    "--auto",
+    "--background",
+    "--all-local-sources",
+  ]);
+  assert.equal(runSync.mock.calls[0].arguments[1].env.TOKENTRACKER_WSL_MODE, undefined);
+  controller.stop();
 });

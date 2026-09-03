@@ -282,7 +282,7 @@ function renderLocalSuccess({ firstSync } = {}) {
     );
   } else {
     lines.push(
-      "  No usage history yet — run any AI CLI and tokens appear within a minute.",
+      "  No usage history yet — run any AI CLI and tokens appear within five minutes.",
     );
   }
 
@@ -319,8 +319,11 @@ function shouldUseBrowserAuth({ deviceToken, opts }) {
 async function buildDryRunSummary({ opts, home, trackerDir, notifyPath, runtime }) {
   const deviceToken = runtime?.deviceToken || null;
   const pendingBrowserAuth = shouldUseBrowserAuth({ deviceToken, opts });
-  const context = buildIntegrationTargets({ home, trackerDir, notifyPath });
-  const summary = await previewIntegrations({ context });
+  const summary = [{
+    label: "AI tool integrations",
+    status: "skipped",
+    detail: "Manage hooks and plugins from the local Dashboard",
+  }];
   return { summary, pendingBrowserAuth, deviceToken };
 }
 
@@ -368,13 +371,11 @@ async function runSetup({
 
   await writeNotifyHandler({ trackerDir, notifyPath });
 
-  const summary = await applyIntegrationSetup({
-    home,
-    trackerDir,
-    notifyPath,
-    notifyOriginalPath,
-    dryRun: Boolean(opts.dryRun),
-  });
+  const summary = [{
+    label: "AI tool integrations",
+    status: "skipped",
+    detail: "Manage hooks and plugins from the local Dashboard",
+  }];
 
   return {
     summary,
@@ -572,7 +573,7 @@ async function applyIntegrationSetup({
   dryRun = false,
 }) {
   const context = buildIntegrationTargets({ home, trackerDir, notifyPath });
-  context.notifyOriginalPath = notifyOriginalPath;
+  if (notifyOriginalPath) context.notifyOriginalPath = notifyOriginalPath;
 
   const summary = [];
 
@@ -1984,6 +1985,7 @@ module.exports = {
   repairCodexNotifyIntegration,
   repairRuntimeIntegrations,
   applyIntegrationSetup,
+  writeNotifyHandler,
 };
 
 async function probeFile(p) {

@@ -684,5 +684,22 @@
   "widgets.preview.reset_hours_minutes": "{{hours}} 小時 {{minutes}} 分鐘後",
   "widgets.preview.metric": "指標",
   "settings.limits.showSubscriptions": "顯示訂閱",
-  "settings.limits.showSubscriptionsHint": "在額度面板中顯示手動記錄的訂閱續費進度。"
+  "settings.limits.showSubscriptionsHint": "在額度面板中顯示手動記錄的訂閱續費進度。",
+  "settings.section.integrations": "整合",
+  "settings.integrations.title": "AI 工具整合",
+  "settings.integrations.subtitle": "只有在你於此處執行操作時才會變更 Hook 或外掛。",
+  "settings.integrations.install": "安裝",
+  "settings.integrations.uninstall": "解除安裝",
+  "settings.integrations.cancel": "取消",
+  "settings.integrations.working": "處理中...",
+  "settings.integrations.status.installed": "已安裝",
+  "settings.integrations.status.available": "可安裝",
+  "settings.integrations.status.not_detected": "未偵測到",
+  "settings.integrations.error": "整合操作失敗：{{error}}",
+  "settings.integrations.sync_now": "立即統計",
+  "settings.integrations.syncing": "統計中...",
+  "settings.integrations.sync_success": "統計資料已更新。",
+  "settings.integrations.sync_error": "統計失敗：{{error}}",
+  "settings.integrations.confirm.title": "解除安裝整合？",
+  "settings.integrations.confirm.description": "要從 {{provider}} 移除由 TokenTracker 管理的整合嗎？其他設定將保留。"
 }

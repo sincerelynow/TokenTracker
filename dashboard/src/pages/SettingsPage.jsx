@@ -1,10 +1,11 @@
 import React from "react";
-import { FlaskConical, Gauge, Globe, Monitor, Palette, Settings, UserRound } from "lucide-react";
+import { FlaskConical, Gauge, Globe, Monitor, Palette, Plug, Settings, UserRound } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { LimitsSettingsPanel } from "../components/LimitsSettingsPanel.jsx";
 import { AccountSection } from "../components/settings/AccountSection.jsx";
 import { AppearanceSection } from "../components/settings/AppearanceSection.jsx";
 import { LabsSection } from "../components/settings/LabsSection.jsx";
+import { IntegrationsSection } from "../components/settings/IntegrationsSection.jsx";
 import {
   SectionCard,
   SegmentedControl,
@@ -15,6 +16,7 @@ import { MenuBarSection, NativeAppFooter } from "../components/settings/MenuBarS
 import { NetworkSection } from "../components/settings/NetworkSection.jsx";
 import { LIMIT_DISPLAY_MODES, useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
 import { useNativeSettings } from "../hooks/use-native-settings.js";
+import { useIntegrations } from "../hooks/use-integrations.js";
 import { useProxySettings } from "../hooks/use-proxy-settings.js";
 import { cn } from "../lib/cn";
 import { copy } from "../lib/copy";
@@ -23,6 +25,7 @@ const SETTINGS_SECTION_IDS = {
   APPEARANCE: "appearance",
   NATIVE_APP: "native-app",
   NETWORK: "network",
+  INTEGRATIONS: "integrations",
   ACCOUNT: "account",
   LIMITS: "limits",
   LABS: "labs",
@@ -49,6 +52,7 @@ export function SettingsPage() {
     setSetting: setNativeSetting,
   } = useNativeSettings();
   const proxySettings = useProxySettings();
+  const integrations = useIntegrations();
   const { available: proxySettingsAvailable } = proxySettings;
   const toastOnReset = nativeSettings?.toastOnReset !== false;
   const confettiOnReset = nativeSettings?.confettiOnReset !== false;
@@ -59,8 +63,10 @@ export function SettingsPage() {
     Object.values(SETTINGS_SECTION_IDS).includes(requestedSection) &&
     (requestedSection !== SETTINGS_SECTION_IDS.NATIVE_APP || nativeSettingsAvailable) &&
     (requestedSection !== SETTINGS_SECTION_IDS.NETWORK || proxySettingsAvailable);
+  const requestedLocalSectionAvailable =
+    requestedSection !== SETTINGS_SECTION_IDS.INTEGRATIONS || integrations.available;
   const activeSection = requestedSectionAvailable
-    ? requestedSection
+    && requestedLocalSectionAvailable ? requestedSection
     : SETTINGS_SECTION_IDS.APPEARANCE;
 
   const selectSection = (section) => {
@@ -94,6 +100,14 @@ export function SettingsPage() {
           label: copy("settings.section.network"),
           Icon: Globe,
           content: <NetworkSection proxySettings={proxySettings} />,
+        }]
+      : []),
+    ...(integrations.available
+      ? [{
+          id: SETTINGS_SECTION_IDS.INTEGRATIONS,
+          label: copy("settings.section.integrations"),
+          Icon: Plug,
+          content: <IntegrationsSection integrationState={integrations} />,
         }]
       : []),
     {

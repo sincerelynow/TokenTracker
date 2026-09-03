@@ -22,7 +22,8 @@ const WSL_DEFAULT_PORT = 7681;
 const DEFAULT_MAX_PORT_ATTEMPTS = 20;
 const NPM_PACKAGE_NAME = "tokentracker-cli";
 const LOCAL_BIND_HOST = "127.0.0.1";
-const NATIVE_BACKGROUND_SYNC_INTERVAL_MS = 60_000;
+const CLI_BACKGROUND_SYNC_INTERVAL_MS = 5 * 60_000;
+const WINDOWS_BACKGROUND_SYNC_INTERVAL_MS = 60_000;
 const STATIC_ASSET_EXTENSIONS = new Set([
   ".css",
   ".gif",
@@ -72,14 +73,8 @@ async function cmdServe(argv) {
   }
 
   try {
-    const { installLocalTrackerApp, repairRuntimeIntegrations } = require("./init");
+    const { installLocalTrackerApp } = require("./init");
     await installLocalTrackerApp({ appDir: path.join(trackerDir, "app") });
-    const repairResult = await repairRuntimeIntegrations({ trackerDir, binDir, safeMode: true });
-    for (const warning of repairResult?.warnings || []) {
-      process.stdout.write(
-        `Runtime integration repair warning (${warning.integration}): ${warning.error}\n`,
-      );
-    }
   } catch (e) {
     process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
   }
@@ -226,10 +221,10 @@ async function cmdServe(argv) {
   // minute as a bounded fallback so the queue cannot remain stale indefinitely.
   // `--no-sync` still skips the blocking startup sync; this periodic pass is
   // Windows-only and uses the lightweight local mode (no cloud upload, Cursor
-  // network request, or deep Codex archive scan). The macOS app owns its own
-  // wake-aware refresh loop; running both loops made sync.lock nearly
-  // continuous and starved provider notify syncs.
-  const nativeBackgroundSync = startNativeBackgroundSync({
+  // network request, or deep Codex archive scan). Native macOS/Linux clients
+  // own their wake-aware five-minute loops; Windows keeps its existing
+  // one-minute fallback. Plain CLI serve owns a five-minute loop here.
+  const backgroundSync = startBackgroundSync({
     onError: (e) =>
       process.stdout.write(`Background local sync warning: ${e?.message || e}\n`),
   });
@@ -255,7 +250,7 @@ async function cmdServe(argv) {
   // 5. Graceful shutdown
   const shutdown = () => {
     process.stdout.write("\nShutting down...\n");
-    nativeBackgroundSync?.stop();
+    backgroundSync?.stop();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000);
   };
@@ -266,16 +261,22 @@ async function cmdServe(argv) {
   await new Promise(() => {});
 }
 
-function startNativeBackgroundSync({
+function startBackgroundSync({
   appShell = process.env.TOKENTRACKER_APP_SHELL,
-  intervalMs = NATIVE_BACKGROUND_SYNC_INTERVAL_MS,
+  intervalMs,
   runSync,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
   onError = () => {},
 } = {}) {
   const normalizedShell = String(appShell || "").trim().toLowerCase();
-  if (normalizedShell !== "windows") return null;
+  if (normalizedShell === "macos" || normalizedShell === "linux") return null;
+  if (normalizedShell && normalizedShell !== "windows") return null;
+  const resolvedIntervalMs = intervalMs || (
+    normalizedShell === "windows"
+      ? WINDOWS_BACKGROUND_SYNC_INTERVAL_MS
+      : CLI_BACKGROUND_SYNC_INTERVAL_MS
+  );
 
   // Run the periodic fallback sync in a child process, not in-process:
   // several provider parsers read SQLite databases via execFileSync, which
@@ -305,10 +306,8 @@ function startNativeBackgroundSync({
     // RemoteApp window that steals focus. This one-minute fallback owns native
     // local freshness only; explicit/manual syncs and provider hooks retain the
     // user's configured WSL mode.
-    const backgroundEnv = {
-      ...process.env,
-      TOKENTRACKER_WSL_MODE: "native-only",
-    };
+    const backgroundEnv = { ...process.env };
+    if (normalizedShell === "windows") backgroundEnv.TOKENTRACKER_WSL_MODE = "native-only";
     const pending = Promise.resolve()
       .then(() => sync(["--auto", "--background", "--all-local-sources"], { env: backgroundEnv }))
       .catch((error) => {
@@ -323,7 +322,7 @@ function startNativeBackgroundSync({
 
   const timer = setIntervalFn(() => {
     void run();
-  }, intervalMs);
+  }, resolvedIntervalMs);
   timer?.unref?.();
 
   return {
@@ -652,6 +651,7 @@ module.exports = {
   parseServeScriptPath,
   resolveDefaultPort,
   shouldServeSpaFallback,
-  startNativeBackgroundSync,
-  NATIVE_BACKGROUND_SYNC_INTERVAL_MS,
+  startBackgroundSync,
+  CLI_BACKGROUND_SYNC_INTERVAL_MS,
+  WINDOWS_BACKGROUND_SYNC_INTERVAL_MS,
 };

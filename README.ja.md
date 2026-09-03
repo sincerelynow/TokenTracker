@@ -45,7 +45,7 @@
 npx tokentracker-cli
 ```
 
-これだけです。初回実行で hook をインストールし、データを同期して、`http://localhost:7680` でダッシュボードを開きます。
+これだけです。初回実行でデータを同期し、`http://localhost:7680` でダッシュボードを開きます。任意の hook とプラグインは**設定 → 連携**から手動で管理できます。
 
 **30 秒で手に入るもの:**
 - 📊 `localhost:7680` のローカルダッシュボードで、使用トレンド、モデル別内訳、コスト分析が見える
@@ -90,7 +90,8 @@ brew install xiufengsun/tokentracker/tokentracker
 
 - 🔌 **34 種類の AI ツールを標準対応** — Claude Code、Codex CLI、Cursor、Gemini CLI、Antigravity、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Dots、Prime Agent、Craft Agents、Reasonix、Kilo CLI、Kilo Code、Roo Code、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、DeepSeek Harness、TRAE Work CN
 - 🏠 **100% ローカル** — トークンデータがマシンから外に出ることはありません。アカウント不要、API キー不要。
-- 🚀 **ゼロコンフィグ** — Hook は初回実行で自動インストール。0 からダッシュボードまで 30 秒。
+- 🚀 **起動時に設定を変更しない** — 初回実行は AI ツールの設定を変更しません。任意の連携はダッシュボードで管理します。
+- 🔄 **定期集計** — CLI `serve` は 5 分ごとにローカルソースを更新し、設定 → 連携から即時集計も実行できます。
 - 📊 **美しいダッシュボード** — 使用トレンド、モデル別コスト内訳、GitHub スタイルのアクティビティヒートマップ、プロジェクト別の帰属表示
 - 🖥️ **ネイティブデスクトップアプリ** — macOS メニューバー（ウィジェット付き）と Windows システムトレイ。それぞれ組み込みサーバーとネイティブ WebView のダッシュボードを備えます
 - 🎨 **4 種類のデスクトップウィジェット** — Pin Usage / Activity Heatmap / Top Models / Usage Limits をデスクトップに固定
@@ -165,22 +166,22 @@ brew install xiufengsun/tokentracker/tokentracker
 
 | ツール | 検出 | 方式 |
 |---|---|---|
-| **Claude Code** | ✅ 自動 | `settings.json` 内の SessionEnd hook |
-| **Codex CLI** | ✅ 自動 | `config.toml` 内の TOML notify hook |
+| **Claude Code** | 手動 | `settings.json` 内の SessionEnd hook |
+| **Codex CLI** | 手動 | `config.toml` 内の TOML notify hook |
 | **Cursor** | ✅ 自動 | API + SQLite の認証トークン |
 | **Kiro** | ✅ 自動 | SQLite + JSONL のハイブリッド |
-| **Gemini CLI** | ✅ 自動 | SessionEnd hook |
-| **OpenCode** | ✅ 自動 | プラグインシステム + SQLite |
-| **OpenClaw** | ✅ 自動 | セッションプラグイン |
-| **Every Code** | ✅ 自動 | TOML notify hook |
+| **Gemini CLI** | 手動 | SessionEnd hook |
+| **OpenCode** | 手動 | プラグインシステム + SQLite |
+| **OpenClaw** | 手動 | セッションプラグイン |
+| **Every Code** | 手動 | TOML notify hook |
 | **Hermes Agent** | ✅ 自動 | SQLite の sessions テーブル (`~/.hermes/state.db`) |
 | **GitHub Copilot App / CLI** | ✅ 自動 | リクエスト単位の統合 SQLite 使用量 (`~/.copilot/session-store.db`)、App DB は旧データのベースライン |
 | **GitHub Copilot Chat 拡張 / 旧 CLI** | ✅ 自動 | OpenTelemetry のファイルエクスポーター (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ 自動 | パッシブな `wire.jsonl` リーダー (`~/.kimi/sessions/**/wire.jsonl`) |
 | **oh-my-pi (Pi Coding Agent)** | ✅ 自動 | パッシブリーダー (`~/.omp/agent/sessions/**/*.jsonl`) |
-| **CodeBuddy** (Tencent) | ✅ 自動 | `~/.codebuddy/settings.json` 内の SessionEnd hook（Claude-Code fork） |
-| **WorkBuddy** (Tencent) | ✅ 自動 | `~/.workbuddy/settings.json` 内の SessionEnd hook（Claude-Code fork）+ パッシブな `projects/**/*.jsonl` スキャン |
-| **Grok Build** (xAI) | ✅ 自動 | SessionEnd hook + パッシブな `updates.jsonl` / `signals.json` スキャン (`~/.grok/sessions/**/`) |
+| **CodeBuddy** (Tencent) | 手動 | `~/.codebuddy/settings.json` 内の SessionEnd hook（Claude-Code fork） |
+| **WorkBuddy** (Tencent) | 手動 | `~/.workbuddy/settings.json` 内の SessionEnd hook（Claude-Code fork）+ パッシブな `projects/**/*.jsonl` スキャン |
+| **Grok Build** (xAI) | 手動 | SessionEnd hook + パッシブな `updates.jsonl` / `signals.json` スキャン (`~/.grok/sessions/**/`) |
 | **Kilo CLI** (kilo.ai) | ✅ 自動 | パッシブな SQLite リーダー (`~/.local/share/kilo/kilo.db`、OpenCode-fork スキーマ) |
 | **Kilo Code** (VS Code 拡張) | ✅ 自動 | パッシブな `ui_messages.json` リーダー (Cursor/Code/CodeBuddy/Windsurf の globalStorage) |
 | **Antigravity** | ✅ 自動 | パッシブなトランスクリプトリーダー (`~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/brain/**/transcript.jsonl`) |
@@ -201,7 +202,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **DeepSeek Harness** | ✅ 自動 | パッシブなセッションリーダー (`~/.dsh/sessions/**/session.jsonl[.zstd]`、セッションヘッダーと assistant イベントを解析し、複数フレームの zstd 展開に対応) |
 | **TRAE Work CN** | ✅ 自動 | **明示的なオプトインが必要です: `TOKENTRACKER_TRAE_CN_USAGE=1` を設定してください。** 使用量の読み取りはローカルに保存されたサインイン認証を TRAE の内部 API に送信するため、有効にするまで何も送信されません。有効化後: ローカル TRAE Work CN のサインイン認証がある場合、実行可能な非バックグラウンド同期中に macOS のサインイン済みアプリから session-token 使用量を読み取ります。内部 API は変更される可能性があります |
 
-> **プラグインや hook を手動でインストールする必要はありますか?** いいえ。`tokentracker`（または `tokentracker init`）が初回実行ですべて処理します:
+> **プラグインや hook の管理方法は?** ローカルダッシュボードの**設定 → 連携**を使用します。起動時や初期化時に AI ツール設定は変更されません:
 > - **Hook ベース**のツール (Claude Code、Codex、Gemini、Every Code、**CodeBuddy**、**WorkBuddy**、**Grok Build**) — ツール自身の設定に SessionEnd hook または TOML notify エントリーを書き込みます。
 > - **プラグインベース**のツール (OpenCode、**OpenClaw**) — プラグインは npm パッケージ内に同梱されています。OpenClaw のセッションプラグインは `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/` にあり、OpenClaw 自身の CLI でリンクして有効化したうえで、同期を起動するセッション終了イベントを許可するために `hooks.allowConversationAccess=true` を設定します。ダウンロードもドラッグ＆ドロップも不要です。
 > - **パッシブリーダー** (Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**oh-my-pi**、**pi**、**Craft Agents**、**Reasonix**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**ZCode**、**AnythingLLM Desktop**、**Claude Science**、**DeepSeek Harness**) — これらのツールには何もインストールしません。ツールがすでに出力しているファイル (SQLite DB、JSONL、OTEL エクスポート、session logs) を読むだけです。Copilot App / CLI の使用量は `~/.copilot/session-store.db` からリクエスト単位で読み取ります。`data.db` は旧データ移行時のベースラインとして一度だけ使い、store が正規ソースになった後は監視専用です。Chat 拡張と旧 CLI は引き続き OTEL を使用し、重複するリクエストは TokenTracker が一度だけ集計します。移行前の混在 App/CLI 履歴でモデルを安全に分離できない残量は、推測したリクエストモデルではなく `github-copilot-legacy` の集計値として保持します。

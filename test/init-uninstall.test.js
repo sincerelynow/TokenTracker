@@ -12,10 +12,11 @@ process.env.TOKENTRACKER_SKIP_FIRST_SYNC = "1";
 process.env.TOKENTRACKER_SKIP_OPENCLAW_CLI = "1";
 
 const {
-  cmdInit,
+  cmdInit: runInit,
   buildNotifyHandler,
   repairCodexNotifyIntegration,
   repairRuntimeIntegrations,
+  applyIntegrationSetup,
 } = require("../src/commands/init");
 const { cmdUninstall } = require("../src/commands/uninstall");
 const { withHome } = require("./helpers/with-home");
@@ -28,6 +29,43 @@ const {
   PLUGIN_MARKER,
 } = require("../src/lib/opencode-config");
 const { GROK_HOOK_FILENAME } = require("../src/lib/grok-hook");
+const { resolveTrackerPaths } = require("../src/lib/tracker-paths");
+
+// Historical lifecycle cases below exercise the now-explicit integration
+// action. Keep their provider coverage while cmdInit itself remains mutation-free.
+async function cmdInit(argv) {
+  await runInit(argv);
+  const home = os.homedir();
+  const { trackerDir, binDir } = await resolveTrackerPaths({ home });
+  await applyIntegrationSetup({
+    home,
+    trackerDir,
+    notifyPath: path.join(binDir, "notify.cjs"),
+    notifyOriginalPath: path.join(trackerDir, "codex_notify_original.json"),
+  });
+}
+
+test("init leaves existing provider configuration unchanged", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-init-no-hooks-"));
+  const restoreHome = withHome(tmp);
+  try {
+    const codexConfig = path.join(tmp, ".codex", "config.toml");
+    const claudeSettings = path.join(tmp, ".claude", "settings.json");
+    await fs.mkdir(path.dirname(codexConfig), { recursive: true });
+    await fs.mkdir(path.dirname(claudeSettings), { recursive: true });
+    await fs.writeFile(codexConfig, 'model = "gpt-5"\n', "utf8");
+    await fs.writeFile(claudeSettings, '{"theme":"dark"}\n', "utf8");
+    const before = await Promise.all([fs.readFile(codexConfig), fs.readFile(claudeSettings)]);
+
+    await runInit(["--yes", "--no-auth", "--no-open"]);
+
+    const after = await Promise.all([fs.readFile(codexConfig), fs.readFile(claudeSettings)]);
+    assert.deepEqual(after, before);
+  } finally {
+    restoreHome();
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
 
 async function waitForFile(filePath, { timeoutMs = 1500, intervalMs = 50 } = {}) {
   const start = Date.now();

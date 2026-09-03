@@ -566,5 +566,22 @@
   "settings.section.labs": "Labs",
   "limits.alert.blocked": "通知がオフです — システム設定で許可してください",
   "settings.limits.showSubscriptions": "サブスクを制限表示に表示",
-  "settings.limits.showSubscriptionsHint": "手動登録した更新日バーを制限と一緒に表示します。"
+  "settings.limits.showSubscriptionsHint": "手動登録した更新日バーを制限と一緒に表示します。",
+  "settings.section.integrations": "連携",
+  "settings.integrations.title": "AI ツール連携",
+  "settings.integrations.subtitle": "ここで操作した場合にのみ Hook またはプラグインを変更します。",
+  "settings.integrations.install": "インストール",
+  "settings.integrations.uninstall": "アンインストール",
+  "settings.integrations.cancel": "キャンセル",
+  "settings.integrations.working": "処理中...",
+  "settings.integrations.status.installed": "インストール済み",
+  "settings.integrations.status.available": "利用可能",
+  "settings.integrations.status.not_detected": "未検出",
+  "settings.integrations.error": "連携操作に失敗しました：{{error}}",
+  "settings.integrations.sync_now": "今すぐ集計",
+  "settings.integrations.syncing": "集計中...",
+  "settings.integrations.sync_success": "統計を更新しました。",
+  "settings.integrations.sync_error": "統計の集計に失敗しました：{{error}}",
+  "settings.integrations.confirm.title": "連携をアンインストールしますか？",
+  "settings.integrations.confirm.description": "{{provider}} から TokenTracker 管理の連携を削除しますか？その他の設定は保持されます。"
 }

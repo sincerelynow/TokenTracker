@@ -743,5 +743,22 @@
   "widgets.preview.reset_hours_minutes": "{{hours}} 小时 {{minutes}} 分钟后",
   "widgets.preview.metric": "指标",
   "settings.limits.showSubscriptions": "显示订阅",
-  "settings.limits.showSubscriptionsHint": "在限额面板中显示手动记录的订阅续费进度。"
+  "settings.limits.showSubscriptionsHint": "在限额面板中显示手动记录的订阅续费进度。",
+  "settings.section.integrations": "集成",
+  "settings.integrations.title": "AI 工具集成",
+  "settings.integrations.subtitle": "仅在你于此处执行操作时更改 Hook 或插件。",
+  "settings.integrations.install": "安装",
+  "settings.integrations.uninstall": "卸载",
+  "settings.integrations.cancel": "取消",
+  "settings.integrations.working": "处理中...",
+  "settings.integrations.status.installed": "已安装",
+  "settings.integrations.status.available": "可安装",
+  "settings.integrations.status.not_detected": "未检测到",
+  "settings.integrations.error": "集成操作失败：{{error}}",
+  "settings.integrations.sync_now": "立即统计",
+  "settings.integrations.syncing": "统计中...",
+  "settings.integrations.sync_success": "统计数据已更新。",
+  "settings.integrations.sync_error": "统计失败：{{error}}",
+  "settings.integrations.confirm.title": "卸载集成？",
+  "settings.integrations.confirm.description": "从 {{provider}} 移除由 TokenTracker 管理的集成？其他配置将保留。"
 }

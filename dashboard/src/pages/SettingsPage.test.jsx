@@ -17,6 +17,13 @@ const nativeSettingsMock = vi.hoisted(() => ({
 const proxySettingsMock = vi.hoisted(() => ({
   available: false,
 }));
+const integrationsMock = vi.hoisted(() => ({
+  available: false,
+  integrations: [],
+  error: null,
+  pendingProvider: null,
+  mutate: vi.fn(),
+}));
 
 const LABELS = {
   "settings.page.title": "Settings",
@@ -27,6 +34,7 @@ const LABELS = {
   "settings.section.limits": "Limits Display",
   "settings.section.labs": "Labs",
   "settings.section.network": "Network",
+  "settings.section.integrations": "Integrations",
   "settings.limits.providers": "Providers",
   "limits.settings.display_mode_label": "Usage Display",
   "settings.menubar.toastOnReset": "Toast on limits reset",
@@ -70,6 +78,10 @@ vi.mock("../hooks/use-proxy-settings.js", () => ({
   }),
 }));
 
+vi.mock("../hooks/use-integrations.js", () => ({
+  useIntegrations: () => integrationsMock,
+}));
+
 vi.mock("../components/settings/AppearanceSection.jsx", () => ({
   AppearanceSection: () => <div data-testid="appearance-content" />,
 }));
@@ -89,6 +101,10 @@ vi.mock("../components/settings/LabsSection.jsx", () => ({
 
 vi.mock("../components/settings/NetworkSection.jsx", () => ({
   NetworkSection: () => <div data-testid="network-content" />,
+}));
+
+vi.mock("../components/settings/IntegrationsSection.jsx", () => ({
+  IntegrationsSection: () => <div data-testid="integrations-content" />,
 }));
 
 vi.mock("../components/LimitsSettingsPanel.jsx", () => ({
@@ -137,6 +153,7 @@ describe("SettingsPage category navigation", () => {
     };
     nativeSettingsMock.setSetting.mockReset();
     proxySettingsMock.available = false;
+    integrationsMock.available = false;
   });
 
   it("switches the visible category while keeping every section mounted", async () => {
@@ -179,6 +196,18 @@ describe("SettingsPage category navigation", () => {
     expect(screen.getByRole("button", { name: "Network" })).toBeInTheDocument();
     expect(container.querySelector('[data-settings-panel="network"]')).not.toBeNull();
     expect(screen.getByTestId("network-content")).toBeInTheDocument();
+  });
+
+  it("shows integrations only when the local endpoint is available", () => {
+    integrationsMock.available = false;
+    const hidden = renderSettings();
+    expect(screen.queryByRole("button", { name: "Integrations" })).not.toBeInTheDocument();
+    hidden.unmount();
+
+    integrationsMock.available = true;
+    const { container } = renderSettings("/settings?section=integrations");
+    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute("aria-current", "page");
+    expect(container.querySelector('[data-settings-panel="integrations"]')).not.toHaveAttribute("hidden");
   });
 
   it("omits the native-app category when the native bridge is unavailable", () => {

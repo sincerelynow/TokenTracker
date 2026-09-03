@@ -563,5 +563,22 @@
   "settings.section.labs": "Labs",
   "limits.alert.blocked": "Benachrichtigungen sind aus – in den Systemeinstellungen erlauben",
   "settings.limits.showSubscriptions": "Abos in Limits anzeigen",
-  "settings.limits.showSubscriptionsHint": "Zeige manuell eingetragene Abo-Verlängerungen zusammen mit den Limits an."
+  "settings.limits.showSubscriptionsHint": "Zeige manuell eingetragene Abo-Verlängerungen zusammen mit den Limits an.",
+  "settings.section.integrations": "Integrationen",
+  "settings.integrations.title": "KI-Tool-Integrationen",
+  "settings.integrations.subtitle": "Hooks und Plugins werden nur durch eine Aktion hier geändert.",
+  "settings.integrations.install": "Installieren",
+  "settings.integrations.uninstall": "Deinstallieren",
+  "settings.integrations.cancel": "Abbrechen",
+  "settings.integrations.working": "Wird ausgeführt...",
+  "settings.integrations.status.installed": "Installiert",
+  "settings.integrations.status.available": "Verfügbar",
+  "settings.integrations.status.not_detected": "Nicht erkannt",
+  "settings.integrations.error": "Integrationsaktion fehlgeschlagen: {{error}}",
+  "settings.integrations.sync_now": "Jetzt synchronisieren",
+  "settings.integrations.syncing": "Synchronisierung...",
+  "settings.integrations.sync_success": "Statistiken sind aktuell.",
+  "settings.integrations.sync_error": "Statistiksynchronisierung fehlgeschlagen: {{error}}",
+  "settings.integrations.confirm.title": "Integration deinstallieren?",
+  "settings.integrations.confirm.description": "Die von TokenTracker verwaltete Integration aus {{provider}} entfernen? Andere Einstellungen bleiben erhalten."
 }

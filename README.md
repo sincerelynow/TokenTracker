@@ -80,11 +80,11 @@ An accurate, local-first token usage and cost dashboard for **34 AI coding tools
 npx tokentracker-cli
 ```
 
-That's it. First run installs hooks, syncs your data, and opens the dashboard at `http://localhost:7680`.
+That's it. First run syncs your data and opens the dashboard at `http://localhost:7680`. Install optional hooks and plugins from **Settings → Integrations**.
 
 **What you get in 30 seconds:**
 - 📊 A local dashboard at `localhost:7680` with usage trends, model breakdown, cost analysis
-- 🔌 Auto-detected hooks for every supported AI tool you have installed
+- 🔌 Dashboard controls for installing and removing optional hooks and plugins
 - 🏠 100% local — no account, no API keys, no network calls (except optional leaderboard)
 - 🧩 *Optional:* a Skills tab that browses 250+ public skills and syncs them across Claude · Codex · Grok · Antigravity · Gemini · OpenCode · Hermes
 
@@ -149,7 +149,8 @@ An Arch `PKGBUILD` for a local pacman install lives in `TokenTrackerLinux/packag
 
 - 🔌 **34 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Antigravity, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy, WorkBuddy, Grok Build, oh-my-pi, pi, Dots, Prime Agent, Craft Agents, Reasonix, Kilo CLI, Kilo Code, Roo Code, Zed Agent, Goose, Droid, Mimo Code, ZCode, Qoder, AnythingLLM Desktop, Claude Science, DeepSeek Harness,TRAE Work CN
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
-- 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
+- 🚀 **No startup mutation** — First run leaves AI tool configuration unchanged; manage optional integrations in the Dashboard.
+- 🔄 **Automatic statistics** — CLI `serve` refreshes local sources every five minutes, with **Sync now** available in Settings → Integrations.
 - 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
 - 🖥️ **Native desktop app** — macOS menu bar (+ widgets) and Windows system tray, each with an embedded server and the dashboard in a native webview
 - 🐾 **Desktop pet** — A pixel companion powered by real coding activity: it works when you work, celebrates streaks, and sleeps when you rest
@@ -235,22 +236,22 @@ An Arch `PKGBUILD` for a local pacman install lives in `TokenTrackerLinux/packag
 
 | Tool | Detection | Method |
 |---|---|---|
-| **Claude Code** | ✅ Auto | SessionEnd hook in `settings.json` |
-| **Codex CLI** | ✅ Auto | TOML notify hook in `config.toml` |
+| **Claude Code** | Manual | SessionEnd hook in `settings.json` |
+| **Codex CLI** | Manual | TOML notify hook in `config.toml` |
 | **Cursor** | ✅ Auto | API + SQLite auth token |
 | **Kiro** | ✅ Auto | SQLite + JSONL hybrid |
-| **Gemini CLI** | ✅ Auto | SessionEnd hook |
-| **OpenCode** | ✅ Auto | Plugin system + SQLite |
-| **OpenClaw** | ✅ Auto | Session plugin |
-| **Every Code** | ✅ Auto | TOML notify hook |
+| **Gemini CLI** | Manual | SessionEnd hook |
+| **OpenCode** | Manual | Plugin system + SQLite |
+| **OpenClaw** | Manual | Session plugin |
+| **Every Code** | Manual | TOML notify hook |
 | **Hermes Agent** | ✅ Auto | SQLite sessions table (`~/.hermes/state.db`) |
 | **GitHub Copilot App / CLI** | ✅ Auto | Unified per-request SQLite usage (`~/.copilot/session-store.db`); App DB legacy baseline |
 | **GitHub Copilot Chat extension / legacy CLI** | ✅ Auto | OpenTelemetry file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ Auto | Passive `wire.jsonl` reader (`~/.kimi/sessions/**/wire.jsonl`) |
-| **oh-my-pi (Pi Coding Agent)** | ✅ Auto | Passive reader (`~/.omp/agent/sessions/**/*.jsonl`) + managed notify extension written by `tokentracker init` to `~/.omp/agent/extensions/tokentracker-notify.ts` for near-real-time sync (skipped if a same-named unmanaged file already exists; removed by `tokentracker uninstall` when still managed) |
-| **CodeBuddy** (Tencent) | ✅ Auto | SessionEnd hook in `~/.codebuddy/settings.json` (Claude-Code fork) |
-| **WorkBuddy** (Tencent) | ✅ Auto | SessionEnd hook in `~/.workbuddy/settings.json` (Claude-Code fork) + passive `projects/**/*.jsonl` scan |
-| **Grok Build** (xAI) | ✅ Auto | SessionEnd hook + passive `updates.jsonl` / `signals.json` scan (`~/.grok/sessions/**/`) |
+| **oh-my-pi (Pi Coding Agent)** | Manual | Passive reader (`~/.omp/agent/sessions/**/*.jsonl`) + optional managed notify extension installed from the Dashboard (a same-named unmanaged file is never overwritten or deleted) |
+| **CodeBuddy** (Tencent) | Manual | SessionEnd hook in `~/.codebuddy/settings.json` (Claude-Code fork) |
+| **WorkBuddy** (Tencent) | Manual | SessionEnd hook in `~/.workbuddy/settings.json` (Claude-Code fork) + passive `projects/**/*.jsonl` scan |
+| **Grok Build** (xAI) | Manual | SessionEnd hook + passive `updates.jsonl` / `signals.json` scan (`~/.grok/sessions/**/`) |
 | **Kilo CLI** (kilo.ai) | ✅ Auto | Passive SQLite reader (`~/.local/share/kilo/kilo.db`, OpenCode-fork schema) |
 | **Kilo Code** (VS Code extension) | ✅ Auto | Passive `ui_messages.json` reader (Cursor/Code/CodeBuddy/Windsurf globalStorage) |
 | **Antigravity** | ✅ Auto | Passive transcript reader (`~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/brain/**/transcript.jsonl`) |
@@ -271,10 +272,10 @@ An Arch `PKGBUILD` for a local pacman install lives in `TokenTrackerLinux/packag
 | **DeepSeek Harness** | ✅ Auto | Passive session reader (`~/.dsh/sessions/**/session.jsonl[.zstd]`; parses session header and assistant events, handles multi-frame zstd decompression) |
 | **TRAE Work CN** | ✅ Auto | **Requires an explicit opt-in: set `TOKENTRACKER_TRAE_CN_USAGE=1`.** Reading usage transmits the locally stored sign-in authorization to TRAE's internal API, so nothing is sent until you turn it on. Once opted in: during eligible non-background sync when local TRAE Work CN auth exists, reads session-token usage from the locally signed-in macOS / Windows app; its internal API may change |
 
-> **Do I need to install any plugin or hook manually?** No. `tokentracker` (or `tokentracker init`) handles everything on first run:
+> **How do I manage plugins and hooks?** Open the local Dashboard and use **Settings → Integrations**. Startup and initialization never modify AI tool configuration:
 > - **Hook-based** tools (Claude Code, Codex, Gemini, Every Code, **CodeBuddy**, **WorkBuddy**, **Grok Build**) — we write a SessionEnd hook or TOML notify entry into the tool's own config.
 > - **Plugin-based** tools (OpenCode, **OpenClaw**) — plugins ship inside the npm package. OpenClaw's session plugin lives at `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/`; we link and enable it via OpenClaw's own CLI, then set `hooks.allowConversationAccess=true` so OpenClaw permits the session-finished event that triggers sync. No download, no drag-and-drop.
-> - **oh-my-pi** — passive session scan is always the billing/token source of truth (`~/.omp/agent/sessions/**/*.jsonl`). When OMP is detected, `tokentracker init` also writes a managed notify extension to `~/.omp/agent/extensions/tokentracker-notify.ts` so turns can trigger near-real-time sync. That file is owned only when it carries TokenTracker's managed marker: a same-named user-authored extension is never overwritten or deleted. `tokentracker uninstall` removes the extension only while it is still managed.
+> - **oh-my-pi** — passive session scan is always the billing/token source of truth (`~/.omp/agent/sessions/**/*.jsonl`). The Dashboard can install a managed notify extension for near-real-time sync. A same-named user-authored extension is never overwritten or deleted.
 > - **Passive readers** (Cursor, Kiro, Hermes, Kimi Code, Copilot, **Grok Build**, **pi**, **Craft Agents**, **Reasonix**, **Kilo CLI**, **Kilo Code**, **Roo Code**, **Antigravity**, **Zed Agent**, **Goose**, **Droid**, **Mimo Code**, **ZCode**, **Qoder**, **AnythingLLM Desktop**, **Claude Science**, **DeepSeek Harness**) — nothing is installed into those tools. We only read files they already produce (SQLite DB, JSONL, OTEL export, session logs). Copilot App / CLI usage is read per request from `~/.copilot/session-store.db`; `data.db` provides the one-time legacy adoption baseline and stays observe-only after the store becomes canonical, while the Chat extension and legacy CLI continue using OTEL. TokenTracker coordinates the sources so overlapping requests are counted once. Mixed App/CLI usage that predates adoption is retained as a `github-copilot-legacy` aggregate rather than assigned to a guessed request model.
 > - **Grok Build estimate** — current local telemetry exposes cumulative `updates.jsonl` `totalTokens`, but not a stable prompt/output/cache split; `signals.json` remains a fallback with `contextTokensUsed` snapshots. TokenTracker estimates Grok cost until per-call usage details are available.
 >

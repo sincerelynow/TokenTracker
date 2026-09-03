@@ -462,6 +462,23 @@ settings.section.appearance,ui,SettingsPage,SettingsPage,sec_appearance,"Appeara
 settings.section.account,ui,SettingsPage,SettingsPage,sec_account,"Account",,active
 settings.section.limits,ui,SettingsPage,SettingsPage,sec_limits,"Limits Display",,active
 settings.section.network,ui,SettingsPage,NetworkSection,sec_network,"Network",,active
+settings.section.integrations,ui,SettingsPage,IntegrationsSection,sec_integrations,"Integrations",,active
+settings.integrations.title,ui,SettingsPage,IntegrationsSection,title,"AI tool integrations",,active
+settings.integrations.subtitle,ui,SettingsPage,IntegrationsSection,subtitle,"Hooks and plugins are changed only when you choose an action here.",,active
+settings.integrations.install,ui,SettingsPage,IntegrationsSection,install,"Install",,active
+settings.integrations.uninstall,ui,SettingsPage,IntegrationsSection,uninstall,"Uninstall",,active
+settings.integrations.cancel,ui,SettingsPage,IntegrationsSection,cancel,"Cancel",,active
+settings.integrations.working,ui,SettingsPage,IntegrationsSection,working,"Working...",,active
+settings.integrations.status.installed,ui,SettingsPage,IntegrationsSection,status_installed,"Installed",,active
+settings.integrations.status.available,ui,SettingsPage,IntegrationsSection,status_available,"Available",,active
+settings.integrations.status.not_detected,ui,SettingsPage,IntegrationsSection,status_not_detected,"Not detected",,active
+settings.integrations.error,ui,SettingsPage,IntegrationsSection,error,"Integration action failed: {{error}}",,active
+settings.integrations.sync_now,ui,SettingsPage,IntegrationsSection,sync_now,"Sync now",,active
+settings.integrations.syncing,ui,SettingsPage,IntegrationsSection,syncing,"Syncing...",,active
+settings.integrations.sync_success,ui,SettingsPage,IntegrationsSection,sync_success,"Statistics are up to date.",,active
+settings.integrations.sync_error,ui,SettingsPage,IntegrationsSection,sync_error,"Statistics sync failed: {{error}}",,active
+settings.integrations.confirm.title,ui,SettingsPage,IntegrationsSection,confirm_title,"Uninstall integration?",,active
+settings.integrations.confirm.description,ui,SettingsPage,IntegrationsSection,confirm_description,"Remove the TokenTracker-managed integration from {{provider}}? Other configuration is preserved.",,active
 settings.network.mode.label,ui,SettingsPage,NetworkSection,mode_label,"Outbound proxy",,active
 settings.network.mode.hint,ui,SettingsPage,NetworkSection,mode_hint,"Choose how Token Tracker reaches the internet for cloud sync. App updates always follow the system proxy.",,active
 settings.network.mode.system,ui,SettingsPage,NetworkSection,mode_system,"System",,active

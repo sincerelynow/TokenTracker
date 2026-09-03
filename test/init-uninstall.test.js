@@ -28,7 +28,7 @@ const {
   DEFAULT_PLUGIN_NAME,
   PLUGIN_MARKER,
 } = require("../src/lib/opencode-config");
-const { GROK_HOOK_FILENAME } = require("../src/lib/grok-hook");
+const { GROK_HOOK_FILENAME, GROK_MANAGED_MARKER, upsertGrokHook } = require("../src/lib/grok-hook");
 const { resolveTrackerPaths } = require("../src/lib/tracker-paths");
 
 // Historical lifecycle cases below exercise the now-explicit integration
@@ -96,12 +96,30 @@ test("notify handler hides detached background sync windows on Windows", () => {
   );
 });
 
-async function runGeneratedNotifyHandler({ trackerDir, notify, args = ["--source=codex", "turn-ended"] }) {
+async function runGeneratedNotifyHandler({
+  trackerDir,
+  notify,
+  args = ["--source=codex", "turn-ended"],
+  spawnCapture = null,
+}) {
   await fs.mkdir(trackerDir, { recursive: true });
+  const trackerBinPath = path.join(trackerDir, "app", "bin", "tracker.js");
+  await fs.mkdir(path.dirname(trackerBinPath), { recursive: true });
+  await fs.writeFile(trackerBinPath, "", "utf8");
   const notifyPath = path.join(trackerDir, "notify.cjs");
+  let source = buildNotifyHandler({ trackerDir, packageName: "tokentracker-cli" });
+  if (spawnCapture) {
+    const captureCommand = JSON.stringify(spawnCapture.command);
+    const capturePath = JSON.stringify(spawnCapture.markerPath);
+    const captureDropArgs = Number(spawnCapture.dropArgs) || 0;
+    source = source.replace(
+      "const cp = require('node:child_process');",
+      `const cp = { spawn(command, args) {\n  if (command === ${captureCommand}) fs.writeFileSync(${capturePath}, args.slice(${captureDropArgs}).join('|'));\n  return { unref() {} };\n} };`,
+    );
+  }
   await fs.writeFile(
     notifyPath,
-    buildNotifyHandler({ trackerDir, packageName: "tokentracker-cli" }),
+    source,
     "utf8",
   );
   await fs.chmod(notifyPath, 0o755);
@@ -191,8 +209,9 @@ test("notify handler chains executable original notify commands and skips stale 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-sky"),
       notify: [skyPath, "turn-ended"],
+      spawnCapture: { command: skyPath, markerPath },
     });
-    assert.equal(await waitForFile(markerPath, { timeoutMs: 5000 }), "ran");
+    assert.equal(await waitForFile(markerPath, { timeoutMs: 5000 }), "turn-ended");
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-missing"),
@@ -240,7 +259,7 @@ test("notify handler skips a nested self notify referenced through a symlinked p
     const trackerDir = path.join(tmp, "tracker");
     await fs.mkdir(trackerDir, { recursive: true });
     const linkDir = path.join(tmp, "tracker-link");
-    await fs.symlink(trackerDir, linkDir, "dir");
+    await fs.symlink(trackerDir, linkDir, process.platform === "win32" ? "junction" : "dir");
     const notifyPath = path.join(linkDir, "notify.cjs");
     const markerPath = path.join(tmp, "sky-marker");
     const skyPath = path.join(tmp, "SkyComputerUseClient");
@@ -259,6 +278,7 @@ test("notify handler skips a nested self notify referenced through a symlinked p
         "--previous-notify",
         JSON.stringify(["/usr/bin/env", "node", notifyPath]),
       ],
+      spawnCapture: { command: skyPath, markerPath },
     });
 
     assert.equal(await waitForFile(markerPath, { timeoutMs: 1500 }), null);
@@ -399,6 +419,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     const fakeEnvPath = path.join(tmp, "env");
     const fakeNodePath = path.join(tmp, "node");
     const explicitScriptPath = path.join(tmp, "notify-script.js");
+    const spawnCapture = { command: fakeEnvPath, markerPath };
     await fs.writeFile(
       fakeEnvPath,
       `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
@@ -419,6 +440,7 @@ test("notify handler validates env split-string interpreter targets", async () =
       await runGeneratedNotifyHandler({
         trackerDir: path.join(tmp, `tracker-env-option-payload-token-${optionNotify[1].replace(/[^A-Za-z0-9]/g, "-")}`),
         notify: optionNotify,
+        spawnCapture,
       });
       assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
     }
@@ -426,6 +448,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-value-option-explicit-script"),
       notify: [fakeEnvPath, "-C", tmp, fakeNodePath, explicitScriptPath],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -442,6 +465,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-chdir-relative-explicit-script"),
       notify: [fakeEnvPath, "--chdir", chdirDir, fakeNodePath, `./${relativeScriptName}`],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -452,66 +476,77 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-chdir-relative-missing-script"),
       notify: [fakeEnvPath, "--chdir", tmp, fakeNodePath, `./${relativeScriptName}`],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-chdir-generic-relative-missing-command"),
       notify: [fakeEnvPath, "--chdir", tmp, "./missing-generic-notify.sh"],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-short-chdir-generic-relative-missing-command"),
       notify: [fakeEnvPath, "-C", tmp, "./missing-generic-notify.sh"],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-unknown-option-explicit-script"),
       notify: [fakeEnvPath, "--unknown-option", fakeNodePath, explicitScriptPath],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-payload-token"),
       notify: [fakeEnvPath, "-S", `${fakeNodePath} turn-ended`],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-long-split-payload-token"),
       notify: [fakeEnvPath, "--split-string", `${fakeNodePath} turn-ended`],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-assignment-payload-token"),
       notify: [fakeEnvPath, "-S", `TOKENTRACKER_TEST=1 ${fakeNodePath} turn-ended`],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-double-dash-payload-token"),
       notify: [fakeEnvPath, "-S", `-- ${fakeNodePath} turn-ended`],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-double-dash-assignment-payload-token"),
       notify: [fakeEnvPath, "--", "TOKENTRACKER_TEST=1", fakeNodePath, "turn-ended"],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-double-dash-assignment-payload-token"),
       notify: [fakeEnvPath, "-S", `-- TOKENTRACKER_TEST=1 ${fakeNodePath} turn-ended`],
+      spawnCapture,
     });
     assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-explicit-script"),
       notify: [fakeEnvPath, "-S", `${fakeNodePath} ${explicitScriptPath}`],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -522,6 +557,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-long-split-explicit-script"),
       notify: [fakeEnvPath, `--split-string=${fakeNodePath} ${explicitScriptPath}`],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -532,6 +568,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-assignment-explicit-script"),
       notify: [fakeEnvPath, "-S", `TOKENTRACKER_TEST=1 ${fakeNodePath} ${explicitScriptPath}`],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -542,6 +579,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-double-dash-assignment-explicit-script"),
       notify: [fakeEnvPath, "--", "TOKENTRACKER_TEST=1", fakeNodePath, explicitScriptPath],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -552,6 +590,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     await runGeneratedNotifyHandler({
       trackerDir: path.join(tmp, "tracker-env-split-double-dash-assignment-explicit-script"),
       notify: [fakeEnvPath, "-S", `-- TOKENTRACKER_TEST=1 ${fakeNodePath} ${explicitScriptPath}`],
+      spawnCapture,
     });
     assert.equal(
       await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -576,12 +615,17 @@ test("notify handler treats exe-suffixed runtimes as node-like interpreters", as
       );
       await fs.chmod(fakeRuntimePath, 0o755);
       await fs.writeFile(explicitScriptPath, "// readable notify script\n", "utf8");
+      const runCaptured = ({ trackerDir, notify }) => runGeneratedNotifyHandler({
+        trackerDir,
+        notify,
+        spawnCapture: { command: notify[0], markerPath },
+      });
 
       const explicitNotify =
         runtimeName === "node"
           ? [fakeRuntimePath, explicitScriptPath, "turn-ended"]
           : [fakeRuntimePath, "run", explicitScriptPath, "turn-ended"];
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-exe-explicit-script`),
         notify: explicitNotify,
       });
@@ -595,7 +639,7 @@ test("notify handler treats exe-suffixed runtimes as node-like interpreters", as
         runtimeName === "node"
           ? [fakeRuntimePath, "turn-ended"]
           : [fakeRuntimePath, "run", "turn-ended"];
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-exe-payload-token`),
         notify: payloadNotify,
       });
@@ -609,6 +653,9 @@ test("notify handler treats exe-suffixed runtimes as node-like interpreters", as
 test("notify handler skips bun and deno original notify when payload token is not a script", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
+    const fakeEnvPath = path.join(tmp, "env");
+    await fs.writeFile(fakeEnvPath, "// readable env executable placeholder\n", "utf8");
+    await fs.chmod(fakeEnvPath, 0o755);
     for (const runtimeName of ["bun", "deno"]) {
       const markerPath = path.join(tmp, `${runtimeName}-payload-marker`);
       const fakeRuntimePath = path.join(tmp, runtimeName);
@@ -622,8 +669,17 @@ test("notify handler skips bun and deno original notify when payload token is no
       await fs.chmod(fakeRuntimePath, 0o755);
       await fs.writeFile(explicitScriptPath, "// readable notify script\n", "utf8");
       await fs.writeFile(lockFilePath, "{}\n", "utf8");
+      const runCaptured = ({ trackerDir, notify }) => runGeneratedNotifyHandler({
+        trackerDir,
+        notify,
+        spawnCapture: {
+          command: notify[0],
+          markerPath,
+          dropArgs: path.basename(notify[0]).replace(/\.exe$/i, "") === "env" ? 1 : 0,
+        },
+      });
 
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-run-explicit-script`),
         notify: [fakeRuntimePath, "run", explicitScriptPath, "turn-ended"],
       });
@@ -637,7 +693,7 @@ test("notify handler skips bun and deno original notify when payload token is no
         runtimeName === "bun"
           ? [fakeRuntimePath, "run", "--cwd", tmp, explicitScriptPath, "turn-ended"]
           : [fakeRuntimePath, "run", "--preload", explicitScriptPath, explicitScriptPath, "turn-ended"];
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-run-value-option-explicit-script`),
         notify: valueOptionNotify,
       });
@@ -653,7 +709,7 @@ test("notify handler skips bun and deno original notify when payload token is no
         await fs.mkdir(bunCwdDir, { recursive: true });
         await fs.writeFile(path.join(bunCwdDir, relativeBunScript), "// readable notify script\n", "utf8");
 
-        await runGeneratedNotifyHandler({
+        await runCaptured({
           trackerDir: path.join(tmp, "tracker-bun-run-cwd-relative-script"),
           notify: [fakeRuntimePath, "run", "--cwd", bunCwdDir, `./${relativeBunScript}`, "turn-ended"],
         });
@@ -663,7 +719,7 @@ test("notify handler skips bun and deno original notify when payload token is no
         );
         await fs.rm(markerPath, { force: true });
 
-        await runGeneratedNotifyHandler({
+        await runCaptured({
           trackerDir: path.join(tmp, "tracker-bun-run-inline-cwd-relative-script"),
           notify: [fakeRuntimePath, "run", `--cwd=${bunCwdDir}`, `./${relativeBunScript}`, "turn-ended"],
         });
@@ -677,13 +733,13 @@ test("notify handler skips bun and deno original notify when payload token is no
         const processCwdOnlyScript = path.join(process.cwd(), processCwdOnlyScriptName);
         await fs.writeFile(processCwdOnlyScript, "// not under bun --cwd\n", "utf8");
         try {
-          await runGeneratedNotifyHandler({
+          await runCaptured({
             trackerDir: path.join(tmp, "tracker-bun-run-cwd-rejects-process-cwd-script"),
             notify: [fakeRuntimePath, "run", "--cwd", bunCwdDir, `./${processCwdOnlyScriptName}`, "turn-ended"],
           });
           assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
-          await runGeneratedNotifyHandler({
+          await runCaptured({
             trackerDir: path.join(tmp, "tracker-bun-run-inline-cwd-rejects-process-cwd-script"),
             notify: [fakeRuntimePath, "run", `--cwd=${bunCwdDir}`, `./${processCwdOnlyScriptName}`, "turn-ended"],
           });
@@ -694,7 +750,7 @@ test("notify handler skips bun and deno original notify when payload token is no
       }
 
       if (runtimeName === "deno") {
-        await runGeneratedNotifyHandler({
+        await runCaptured({
           trackerDir: path.join(tmp, "tracker-deno-run-lock-explicit-script"),
           notify: [fakeRuntimePath, "run", "--lock", lockFilePath, explicitScriptPath, "turn-ended"],
         });
@@ -705,9 +761,9 @@ test("notify handler skips bun and deno original notify when payload token is no
         await fs.rm(markerPath, { force: true });
       }
 
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-env-${runtimeName}-run-explicit-script`),
-        notify: ["/usr/bin/env", fakeRuntimePath, "run", explicitScriptPath, "turn-ended"],
+        notify: [fakeEnvPath, fakeRuntimePath, "run", explicitScriptPath, "turn-ended"],
       });
       assert.match(
         await waitForFile(markerPath, { timeoutMs: 5000 }),
@@ -715,19 +771,19 @@ test("notify handler skips bun and deno original notify when payload token is no
       );
       await fs.rm(markerPath, { force: true });
 
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-payload-token`),
         notify: [fakeRuntimePath, "turn-ended"],
       });
       assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-env-${runtimeName}-payload-token`),
-        notify: ["/usr/bin/env", fakeRuntimePath, "turn-ended"],
+        notify: [fakeEnvPath, fakeRuntimePath, "turn-ended"],
       });
       assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-run-payload-token`),
         notify: [fakeRuntimePath, "run", "turn-ended"],
       });
@@ -737,23 +793,23 @@ test("notify handler skips bun and deno original notify when payload token is no
         runtimeName === "bun"
           ? [fakeRuntimePath, "run", "--cwd", tmp, "turn-ended"]
           : [fakeRuntimePath, "run", "--preload", explicitScriptPath, "turn-ended"];
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-${runtimeName}-run-value-option-payload-token`),
         notify: valueOptionPayloadNotify,
       });
       assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
 
       if (runtimeName === "deno") {
-        await runGeneratedNotifyHandler({
+        await runCaptured({
           trackerDir: path.join(tmp, "tracker-deno-run-lock-payload-token"),
           notify: [fakeRuntimePath, "run", "--lock", lockFilePath, "turn-ended"],
         });
         assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
       }
 
-      await runGeneratedNotifyHandler({
+      await runCaptured({
         trackerDir: path.join(tmp, `tracker-env-${runtimeName}-run-payload-token`),
-        notify: ["/usr/bin/env", fakeRuntimePath, "run", "turn-ended"],
+        notify: [fakeEnvPath, fakeRuntimePath, "run", "turn-ended"],
       });
       assert.equal(await waitForFile(markerPath, { timeoutMs: 500 }), null);
     }
@@ -1768,22 +1824,10 @@ test("uninstall removes Grok Build hook and handler", async () => {
     const handlerPath = path.join(tmp, ".tokentracker", "bin", "grok-session-end-hook.cjs");
     const legacyHandlerPath = path.join(trackerDir, "bin", "grok-session-end-hook.cjs");
 
-    await fs.mkdir(path.dirname(hookPath), { recursive: true });
-    await fs.mkdir(path.dirname(handlerPath), { recursive: true });
+    await fs.mkdir(path.join(process.env.GROK_HOME, "sessions"), { recursive: true });
     await fs.mkdir(path.dirname(legacyHandlerPath), { recursive: true });
-    await fs.writeFile(
-      hookPath,
-      JSON.stringify({
-        hooks: {
-          SessionEnd: [
-            { hooks: [{ type: "command", command: `/usr/bin/env node ${handlerPath}` }] },
-          ],
-        },
-      }) + "\n",
-      "utf8",
-    );
-    await fs.writeFile(handlerPath, "handler\n", "utf8");
-    await fs.writeFile(legacyHandlerPath, "legacy handler\n", "utf8");
+    await upsertGrokHook({ home: tmp, trackerDir, env: process.env });
+    await fs.writeFile(legacyHandlerPath, `// ${GROK_MANAGED_MARKER}\nlegacy handler\n`, "utf8");
 
     process.stdout.write = () => true;
     await cmdUninstall([]);
@@ -1796,6 +1840,29 @@ test("uninstall removes Grok Build hook and handler", async () => {
     restoreHome();
     if (prevGrokHome === undefined) delete process.env.GROK_HOME;
     else process.env.GROK_HOME = prevGrokHome;
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("Grok integration preserves non-managed files with reserved names", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-grok-unmanaged-"));
+  const grokHome = path.join(tmp, ".grok");
+  const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+  const hookPath = path.join(grokHome, "hooks", GROK_HOOK_FILENAME);
+  const handlerPath = path.join(tmp, ".tokentracker", "bin", "grok-session-end-hook.cjs");
+  const env = { ...process.env, GROK_HOME: grokHome };
+  try {
+    await fs.mkdir(path.dirname(hookPath), { recursive: true });
+    await fs.mkdir(path.dirname(handlerPath), { recursive: true });
+    await fs.writeFile(hookPath, '{"owner":"user"}\n');
+    await fs.writeFile(handlerPath, "// user handler\n");
+
+    await assert.rejects(upsertGrokHook({ home: tmp, trackerDir, env }), { code: "GROK_HOOK_NOT_MANAGED" });
+    const { removeGrokHook } = require("../src/lib/grok-hook");
+    assert.equal((await removeGrokHook({ home: tmp, trackerDir, env })).removed, false);
+    assert.equal(await fs.readFile(hookPath, "utf8"), '{"owner":"user"}\n');
+    assert.equal(await fs.readFile(handlerPath, "utf8"), "// user handler\n");
+  } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
 });

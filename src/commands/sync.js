@@ -8,6 +8,7 @@ const readline = require("node:readline");
 const { resolveInstallPaths, resolveZcodeNativeDbPath, ensureFlatCursor } = require("../lib/install-resolver");
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
 const wsl = require("../lib/wsl-probe");
+const { resolveCodexRootsSync } = require("../lib/codex-roots");
 const {
   ensureDir,
   readJson,
@@ -563,7 +564,8 @@ async function cmdSync(argv, context = {}) {
         replacementDeviceToken,
       };
     }
-    const codexCursorRoots = [process.env.CODEX_HOME || path.join(home, ".codex")];
+    const codexRootState = resolveCodexRootsSync({ home, trackerDir, env: process.env });
+    const codexCursorRoots = codexRootState.roots.map((root) => root.path);
     const cursorStore = await openCursorStore({
       trackerDir,
       cursorsPath,
@@ -663,7 +665,6 @@ async function cmdSync(argv, context = {}) {
 
     const sources = [];
     if (sourceAllowed("codex")) {
-      const codexNativeValue = process.env.CODEX_HOME || path.join(home, ".codex");
       // resolveInstallPaths stays the single authority for wsl-first /
       // native-first / wsl-only / native-only / both selection; requireAnyChild
       // makes it validate that a candidate actually holds sessions/ or
@@ -685,22 +686,10 @@ async function cmdSync(argv, context = {}) {
       // the dashboard counted none of their tokens. Safe because the parser
       // dedups Codex events by sessionUUID:eventTimestamp, so the same session
       // seen under two path spellings collapses instead of double-counting.
-      const codexPaths = resolveInstallPaths({
-        nativeValue: codexNativeValue,
-        wslDir: ".codex",
-        requireAnyChild: ["sessions", "archived_sessions"],
-        union: true,
-      });
-      if (codexPaths.native) {
-        sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "sessions"), codexInventoryCache: true });
+      for (const root of codexRootState.roots) {
+        sources.push({ source: "codex", sessionsDir: path.join(root.path, "sessions"), codexInventoryCache: true });
         if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
-          sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "archived_sessions"), deep: true });
-        }
-      }
-      if (codexPaths.wsl) {
-        sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "sessions"), codexInventoryCache: true });
-        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
-          sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "archived_sessions"), deep: true });
+          sources.push({ source: "codex", sessionsDir: path.join(root.path, "archived_sessions"), deep: true });
         }
       }
     }

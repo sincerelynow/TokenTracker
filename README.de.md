@@ -92,6 +92,7 @@ Aktualisieren mit `brew upgrade --cask xiufengsun/tokentracker/tokentracker`. De
 - 🏠 **100 % lokal** — Token-Daten verlassen nie deinen Rechner. Kein Konto, keine API-Keys.
 - 🚀 **Keine Änderung beim Start** — Der erste Start lässt KI-Tool-Konfigurationen unverändert; optionale Integrationen werden im Dashboard verwaltet.
 - 🔄 **Regelmäßige Statistik** — CLI `serve` aktualisiert lokale Quellen alle fünf Minuten; unter Einstellungen → Integrationen ist eine sofortige Synchronisierung verfügbar.
+- 📁 **Mehrere Codex-Verzeichnisse** — Unter Einstellungen → Integrationen lassen sich mehrere Codex-Homes scannen. Die gespeicherte Liste hat Vorrang vor `CODEX_HOME`; entfernte Verzeichnisse stoppen nur künftige Scans, historische Nutzung bleibt erhalten.
 - 📊 **Schönes Dashboard** — Nutzungstrends, Kostenaufschlüsselung nach Modell, GitHub-ähnliche Aktivitäts-Heatmap, Projektzuordnung
 - 🖥️ **Native Desktop-App** — macOS Menüleiste (+ Widgets) und Windows System Tray, jeweils mit eingebautem Server und Dashboard in einer nativen WebView
 - 🎨 **4 Desktop-Widgets** — Nutzung / Aktivitäts-Heatmap / Top-Modelle / Nutzungslimits auf dem Schreibtisch

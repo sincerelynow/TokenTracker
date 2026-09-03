@@ -12,8 +12,8 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
+const { resolveCodexRootPaths } = require("./codex-roots");
 
 const {
   emptyTotals,
@@ -396,10 +396,12 @@ async function computeCodexContextBreakdown({
     toKey = range?.to || null;
   }
 
-  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
   const roots = codexDir
     ? [codexDir]
-    : [path.join(codexHome, "sessions"), path.join(codexHome, "archived_sessions")];
+    : resolveCodexRootPaths().flatMap((root) => [
+        path.join(root, "sessions"),
+        path.join(root, "archived_sessions"),
+      ]);
   const baseDir = roots.join(path.delimiter);
   const diagnostics = {
     cache_hit: false,

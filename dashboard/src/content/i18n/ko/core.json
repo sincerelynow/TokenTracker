@@ -583,5 +583,19 @@
   "settings.integrations.sync_success": "통계가 최신 상태입니다.",
   "settings.integrations.sync_error": "통계 동기화 실패: {{error}}",
   "settings.integrations.confirm.title": "통합을 제거할까요?",
-  "settings.integrations.confirm.description": "{{provider}}에서 TokenTracker가 관리하는 통합을 제거할까요? 다른 설정은 유지됩니다."
+  "settings.integrations.confirm.description": "{{provider}}에서 TokenTracker가 관리하는 통합을 제거할까요? 다른 설정은 유지됩니다.",
+  "settings.codex_roots.title": "Codex 스캔 루트",
+  "settings.codex_roots.subtitle": "세션을 스캔할 로컬 Codex 홈을 선택합니다. 변경 사항은 다음 동기화부터 적용됩니다.",
+  "settings.codex_roots.add": "루트 추가",
+  "settings.codex_roots.path": "Codex 루트 {{index}}",
+  "settings.codex_roots.placeholder": "예: ~/.codex",
+  "settings.codex_roots.remove": "Codex 루트 {{index}} 제거",
+  "settings.codex_roots.duplicate": "이미 목록에 있는 루트입니다.",
+  "settings.codex_roots.detected": "세션 감지됨",
+  "settings.codex_roots.not_detected": "아직 세션이 감지되지 않음",
+  "settings.codex_roots.wsl_detected": "WSL 세션 루트 {{path}}도 감지되었습니다.",
+  "settings.codex_roots.save": "루트 저장",
+  "settings.codex_roots.saving": "저장 중...",
+  "settings.codex_roots.saved": "Codex 스캔 루트를 저장했습니다.",
+  "settings.codex_roots.error": "Codex 루트를 저장할 수 없습니다: {{error}}"
 }

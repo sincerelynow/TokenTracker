@@ -170,12 +170,13 @@ test("v2 migration rejects malformed legacy cursor state", async () => {
   });
 });
 
-test("explicit Codex roots shard custom CODEX_HOME session paths", async () => {
+test("explicit Codex roots shard multiple custom session paths", async () => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-custom-codex-root-"));
   try {
     const trackerDir = path.join(home, ".tokentracker", "tracker");
     const cursorsPath = path.join(trackerDir, "cursors.json");
     const codexRoot = path.join(home, "custom-codex-data");
+    const secondCodexRoot = path.join(home, "custom-codex-data-2");
     const rolloutPath = path.join(
       codexRoot,
       "sessions",
@@ -184,25 +185,36 @@ test("explicit Codex roots shard custom CODEX_HOME session paths", async () => {
       "17",
       "rollout-2026-07-17T00-00-00-custom.jsonl",
     );
+    const secondRolloutPath = path.join(
+      secondCodexRoot,
+      "archived_sessions",
+      "rollout-2026-07-17T00-00-00-custom-2.jsonl",
+    );
     await fs.mkdir(path.dirname(rolloutPath), { recursive: true });
+    await fs.mkdir(path.dirname(secondRolloutPath), { recursive: true });
     await fs.mkdir(trackerDir, { recursive: true });
     await fs.writeFile(rolloutPath, "{}\n", "utf8");
+    await fs.writeFile(secondRolloutPath, "{}\n", "utf8");
     await fs.writeFile(cursorsPath, `${JSON.stringify({
       version: 1,
-      files: { [rolloutPath]: { inode: 1, offset: 3 } },
+      files: {
+        [rolloutPath]: { inode: 1, offset: 3 },
+        [secondRolloutPath]: { inode: 2, offset: 3 },
+      },
       codexHashes: [],
     })}\n`, "utf8");
 
     const store = await openCursorStore({
       trackerDir,
       cursorsPath,
-      codexRoots: [codexRoot],
+      codexRoots: [codexRoot, secondCodexRoot],
       forceV2: true,
     });
     assert.equal(store.cursors.files[rolloutPath], undefined);
-    assert.equal(store.fileCount, 1);
-    await store.loadCodexFilesForPaths([rolloutPath]);
+    assert.equal(store.fileCount, 2);
+    await store.loadCodexFilesForPaths([rolloutPath, secondRolloutPath]);
     assert.equal(store.cursors.files[rolloutPath].offset, 3);
+    assert.equal(store.cursors.files[secondRolloutPath].offset, 3);
   } finally {
     await fs.rm(home, { recursive: true, force: true });
   }

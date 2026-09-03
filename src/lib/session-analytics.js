@@ -33,6 +33,7 @@ const { parseCodexRolloutFile } = require("./codex-rollout-parser");
 const { computeRowCost } = require("./pricing");
 const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
 const wsl = require("./wsl-probe");
+const { resolveCodexRootPaths } = require("./codex-roots");
 
 // Bump the sidecar when derived metrics change so cached rows are rebuilt
 // instead of leaving the dashboard on the previous (over-counted) heuristic.
@@ -861,6 +862,21 @@ function providerRoots(home, providerDir, env, deps = {}) {
   const platform = deps.platform || process.platform;
   const homedir = deps.homedir || os.homedir;
   const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
+  if (providerDir === ".codex") {
+    const probeWsl = deps.probeWsl !== undefined
+      ? Boolean(deps.probeWsl)
+      : path.resolve(home) === path.resolve(homedir());
+    const resolver = deps.resolveCodexRootPaths || resolveCodexRootPaths;
+    const isProcessHome = path.resolve(home) === path.resolve(homedir());
+    const codexEnv = isProcessHome ? env : { ...env, CODEX_HOME: "" };
+    return resolver({
+      home,
+      env: codexEnv,
+      platform,
+      includeWsl: probeWsl,
+      discoverWslHome,
+    });
+  }
   const roots = [];
   if (platform !== "win32" || wsl.shouldProbeNative(env)) {
     const useProcessCodexHome = providerDir === ".codex"

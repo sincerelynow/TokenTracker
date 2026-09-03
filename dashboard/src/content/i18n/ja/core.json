@@ -583,5 +583,19 @@
   "settings.integrations.sync_success": "統計を更新しました。",
   "settings.integrations.sync_error": "統計の集計に失敗しました：{{error}}",
   "settings.integrations.confirm.title": "連携をアンインストールしますか？",
-  "settings.integrations.confirm.description": "{{provider}} から TokenTracker 管理の連携を削除しますか？その他の設定は保持されます。"
+  "settings.integrations.confirm.description": "{{provider}} から TokenTracker 管理の連携を削除しますか？その他の設定は保持されます。",
+  "settings.codex_roots.title": "Codex スキャンルート",
+  "settings.codex_roots.subtitle": "セッションをスキャンするローカル Codex ホームを選択します。変更は次回の同期から反映されます。",
+  "settings.codex_roots.add": "ルートを追加",
+  "settings.codex_roots.path": "Codex ルート {{index}}",
+  "settings.codex_roots.placeholder": "例: ~/.codex",
+  "settings.codex_roots.remove": "Codex ルート {{index}} を削除",
+  "settings.codex_roots.duplicate": "このルートは既に登録されています。",
+  "settings.codex_roots.detected": "セッションを検出しました",
+  "settings.codex_roots.not_detected": "セッションはまだ検出されていません",
+  "settings.codex_roots.wsl_detected": "WSL セッションルート {{path}} も検出されました。",
+  "settings.codex_roots.save": "ルートを保存",
+  "settings.codex_roots.saving": "保存中...",
+  "settings.codex_roots.saved": "Codex スキャンルートを保存しました。",
+  "settings.codex_roots.error": "Codex ルートを保存できませんでした: {{error}}"
 }

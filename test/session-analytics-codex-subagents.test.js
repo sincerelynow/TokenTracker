@@ -72,6 +72,19 @@ test("Codex session roots honor CODEX_HOME only for the process home", () => {
   );
 });
 
+test("Codex session roots use the persisted multi-root configuration", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-session-roots-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const roots = [path.join(home, ".codex"), path.join(home, ".codex-ipc")];
+  await Promise.all(roots.map((root) => fs.mkdir(root, { recursive: true })));
+  await fs.mkdir(path.join(home, ".tokentracker", "tracker"), { recursive: true });
+  await fs.writeFile(
+    path.join(home, ".tokentracker", "tracker", "config.json"),
+    `${JSON.stringify({ codexHomes: roots })}\n`,
+  );
+  assert.deepEqual(providerRoots(home, ".codex", {}, { homedir: () => home, probeWsl: false }), roots);
+});
+
 test("custom CODEX_HOME rollouts load titles from the provider-root index", async () => {
   const providerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-custom-root-"));
   const sessionId = "11111111-2222-4333-8444-555555555555";

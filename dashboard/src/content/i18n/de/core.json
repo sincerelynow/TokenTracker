@@ -580,5 +580,19 @@
   "settings.integrations.sync_success": "Statistiken sind aktuell.",
   "settings.integrations.sync_error": "Statistiksynchronisierung fehlgeschlagen: {{error}}",
   "settings.integrations.confirm.title": "Integration deinstallieren?",
-  "settings.integrations.confirm.description": "Die von TokenTracker verwaltete Integration aus {{provider}} entfernen? Andere Einstellungen bleiben erhalten."
+  "settings.integrations.confirm.description": "Die von TokenTracker verwaltete Integration aus {{provider}} entfernen? Andere Einstellungen bleiben erhalten.",
+  "settings.codex_roots.title": "Codex-Scanverzeichnisse",
+  "settings.codex_roots.subtitle": "Wähle die lokalen Codex-Verzeichnisse für den Sitzungsscan. Änderungen gelten ab der nächsten Synchronisierung.",
+  "settings.codex_roots.add": "Verzeichnis hinzufügen",
+  "settings.codex_roots.path": "Codex-Verzeichnis {{index}}",
+  "settings.codex_roots.placeholder": "Zum Beispiel: ~/.codex",
+  "settings.codex_roots.remove": "Codex-Verzeichnis {{index}} entfernen",
+  "settings.codex_roots.duplicate": "Dieses Verzeichnis ist bereits aufgeführt.",
+  "settings.codex_roots.detected": "Sitzungen erkannt",
+  "settings.codex_roots.not_detected": "Noch keine Sitzungen erkannt",
+  "settings.codex_roots.wsl_detected": "Zusätzlich wurde das WSL-Verzeichnis {{path}} erkannt.",
+  "settings.codex_roots.save": "Verzeichnisse speichern",
+  "settings.codex_roots.saving": "Wird gespeichert...",
+  "settings.codex_roots.saved": "Codex-Scanverzeichnisse gespeichert.",
+  "settings.codex_roots.error": "Codex-Verzeichnisse konnten nicht gespeichert werden: {{error}}"
 }

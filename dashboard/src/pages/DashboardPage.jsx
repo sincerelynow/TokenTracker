@@ -29,6 +29,7 @@ import { shouldShowInstallCard } from "../lib/install-status";
 import { getMockNow, isMockEnabled } from "../lib/mock-data";
 import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 import { startLocalUsageAutoRefresh } from "../lib/local-usage-auto-refresh";
+import { subscribeLocalUsageSynced } from "../lib/integrations-api";
 import { buildDailyBreakdownRange, selectDailyBreakdownRows } from "../lib/daily-breakdown";
 import { buildFleetData, buildTopModels, resolveDisplayTokens } from "../lib/model-breakdown";
 import { safeWriteClipboard } from "../lib/safe-browser";
@@ -914,6 +915,14 @@ export function DashboardPage({
   useEffect(() => {
     refreshUsageStatsRef.current = refreshUsageStats;
   }, [refreshUsageStats]);
+
+  useEffect(() => {
+    if (!isLocalMode || mockEnabled || accountView) return undefined;
+    return subscribeLocalUsageSynced(
+      () => refreshUsageStatsRef.current(),
+      { onError: (error) => console.warn("[DashboardPage] Settings usage refresh failed:", error) },
+    );
+  }, [isLocalMode, mockEnabled, accountView]);
 
   // The DMG starts its embedded server with --no-sync, so a page reload used
   // to fetch the same stale queue again. Refresh all local log/database sources

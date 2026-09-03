@@ -151,6 +151,7 @@ An Arch `PKGBUILD` for a local pacman install lives in `TokenTrackerLinux/packag
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **No startup mutation** — First run leaves AI tool configuration unchanged; manage optional integrations in the Dashboard.
 - 🔄 **Automatic statistics** — CLI `serve` refreshes local sources every five minutes, with **Sync now** available in Settings → Integrations.
+- 📁 **Multiple Codex roots** — Settings → Integrations can scan several Codex homes. Saved roots override `CODEX_HOME`; removing one stops future scans without deleting historical usage.
 - 📊 **Beautiful dashboard** — Usage trends, cost breakdowns by model, GitHub-style activity heatmap, project attribution
 - 🖥️ **Native desktop app** — macOS menu bar (+ widgets) and Windows system tray, each with an embedded server and the dashboard in a native webview
 - 🐾 **Desktop pet** — A pixel companion powered by real coding activity: it works when you work, celebrates streaks, and sleeps when you rest

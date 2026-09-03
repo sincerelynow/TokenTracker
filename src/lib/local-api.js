@@ -2034,6 +2034,48 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- Codex scan roots (local Dashboard only) ---
+    if (p === "/functions/tokentracker-codex-roots") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method !== "GET" && method !== "POST") {
+        json(res, { ok: false, error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      if (!isAuthorizedLocalMutation(req)) {
+        json(res, { ok: false, error: "Unauthorized" }, 401);
+        return true;
+      }
+      const rootsManager = require("./codex-roots");
+      const options = {
+        home: os.homedir(),
+        trackerDir: path.dirname(qp),
+        env: process.env,
+      };
+      try {
+        if (method === "GET") {
+          json(res, { ok: true, ...rootsManager.resolveCodexRootsSync(options) });
+          return true;
+        }
+        let body;
+        try {
+          body = await readJsonBody(req);
+        } catch {
+          json(res, { ok: false, error: "invalid JSON" }, 400);
+          return true;
+        }
+        const result = await rootsManager.saveCodexRoots(body?.roots, options);
+        json(res, { ok: true, ...result });
+      } catch (error) {
+        const status = String(error?.code || "").startsWith("CODEX_ROOTS_") ? 400 : 500;
+        json(res, {
+          ok: false,
+          error: error?.message || "Codex roots operation failed",
+          code: error?.code || "CODEX_ROOTS_OPERATION_FAILED",
+        }, status);
+      }
+      return true;
+    }
+
     // --- wrapped (year-end summary, à la Spotify Wrapped) ---
     if (p === "/functions/tokentracker-wrapped") {
       const yearParam = url.searchParams.get("year");

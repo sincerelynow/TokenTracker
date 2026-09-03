@@ -24,6 +24,17 @@ const integrationsMock = vi.hoisted(() => ({
   pendingProvider: null,
   mutate: vi.fn(),
 }));
+const codexRootsMock = vi.hoisted(() => ({
+  available: false,
+  loading: false,
+  saving: false,
+  roots: [],
+  configured: false,
+  source: "default",
+  max_roots: 16,
+  error: null,
+  save: vi.fn(),
+}));
 
 const LABELS = {
   "settings.page.title": "Settings",
@@ -80,6 +91,10 @@ vi.mock("../hooks/use-proxy-settings.js", () => ({
 
 vi.mock("../hooks/use-integrations.js", () => ({
   useIntegrations: () => integrationsMock,
+}));
+
+vi.mock("../hooks/use-codex-roots.js", () => ({
+  useCodexRoots: () => codexRootsMock,
 }));
 
 vi.mock("../components/settings/AppearanceSection.jsx", () => ({

@@ -4,6 +4,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
+const { withHome } = require("./helpers/with-home");
 
 const { computeCodexContextBreakdown: computeRawCodexContextBreakdown } = require(
   "../src/lib/codex-context-breakdown",
@@ -43,6 +44,33 @@ const BASELINE_USAGE = {
   reasoning_output_tokens: 1,
   total_tokens: 112,
 };
+
+test("Context scans every persisted Codex root", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-context-roots-"));
+  const restoreHome = withHome(home);
+  const previousCodexHome = process.env.CODEX_HOME;
+  t.after(async () => {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    restoreHome();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+  delete process.env.CODEX_HOME;
+  const first = path.join(home, ".codex");
+  const second = path.join(home, ".codex-ipc");
+  const trackerDir = path.join(home, ".tokentracker", "tracker");
+  await fs.mkdir(trackerDir, { recursive: true });
+  await fs.writeFile(path.join(trackerDir, "config.json"), `${JSON.stringify({ codexHomes: [first, second] })}\n`);
+  await writeRollout(path.join(first, "sessions"), "2026-08-20", "rollout-11111111-1111-4111-8111-111111111111.jsonl", [
+    tokenCount("2026-08-20T12:00:00.000Z", BASELINE_USAGE),
+  ]);
+  await writeRollout(path.join(second, "sessions"), "2026-08-20", "rollout-22222222-2222-4222-8222-222222222222.jsonl", [
+    tokenCount("2026-08-20T12:01:00.000Z", BASELINE_USAGE),
+  ]);
+
+  const result = await computeCodexContextBreakdown({ exhaustive: true });
+  assert.equal(result.diagnostics.discovered_files, 2);
+});
 
 const TARGET_USAGE = {
   input_tokens: 160,

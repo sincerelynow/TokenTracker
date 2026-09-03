@@ -539,7 +539,7 @@ test("an inode rewrite still uses historical Codex hashes without rematerializin
     const cursors = {
       version: 1,
       files: {
-        [rolloutPath]: { inode: stat.ino + 1, offset: stat.size, lastTotal: null },
+        [rolloutPath]: { inode: stat.ino === 1 ? 2 : 1, offset: stat.size, lastTotal: null },
       },
       codexHashes: observedHashes.proxy,
     };
@@ -1215,5 +1215,53 @@ test("v2 cursor shards preserve legacy parser output and event hashes", async ()
   } finally {
     global.Date = RealDate;
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("configured Codex roots are unioned, deduplicated, and stop scanning after removal", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-multi-root-"));
+  const restoreHome = withHome(home);
+  const previousCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  try {
+    const trackerDir = path.join(home, ".tokentracker", "tracker");
+    const first = path.join(home, ".codex");
+    const second = path.join(home, ".codex-ipc");
+    const dayA = path.join(first, "sessions", "2030", "06", "02");
+    const dayB = path.join(second, "sessions", "2030", "06", "02");
+    await fs.mkdir(dayA, { recursive: true });
+    await fs.mkdir(dayB, { recursive: true });
+    await fs.mkdir(trackerDir, { recursive: true });
+    await fs.writeFile(path.join(trackerDir, "config.json"), `${JSON.stringify({ codexHomes: [first, second] })}\n`);
+
+    const sharedId = "00000000-0000-4000-8000-000000000001";
+    const secondId = "00000000-0000-4000-8000-000000000002";
+    const sharedLine = `${JSON.stringify(codexTokenEvent("2030-06-02T12:00:00.000Z", 10))}\n`;
+    await fs.writeFile(path.join(dayA, `rollout-${sharedId}.jsonl`), sharedLine);
+    await fs.writeFile(path.join(dayB, `rollout-${sharedId}.jsonl`), sharedLine);
+    await fs.writeFile(
+      path.join(dayB, `rollout-${secondId}.jsonl`),
+      `${JSON.stringify(codexTokenEvent("2030-06-02T12:01:00.000Z", 20))}\n`,
+    );
+
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+    const queuePath = path.join(trackerDir, "queue.jsonl");
+    const firstRows = (await readJsonlRows(queuePath)).filter((row) => row.source === "codex");
+    assert.equal(firstRows.reduce((sum, row) => sum + row.total_tokens, 0), 30);
+
+    await fs.writeFile(path.join(trackerDir, "config.json"), `${JSON.stringify({ codexHomes: [first] })}\n`);
+    const removedRootId = "00000000-0000-4000-8000-000000000003";
+    await fs.writeFile(
+      path.join(dayB, `rollout-${removedRootId}.jsonl`),
+      `${JSON.stringify(codexTokenEvent("2030-06-02T12:02:00.000Z", 40))}\n`,
+    );
+    await cmdSync(["--auto", "--from-retry", "--source=codex"]);
+    const secondRows = (await readJsonlRows(queuePath)).filter((row) => row.source === "codex");
+    assert.equal(secondRows.reduce((sum, row) => sum + row.total_tokens, 0), 30);
+  } finally {
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    restoreHome();
+    await fs.rm(home, { recursive: true, force: true });
   }
 });

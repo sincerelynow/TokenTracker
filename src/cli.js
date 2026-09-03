@@ -92,6 +92,7 @@ function printHelp() {
       "  - optional: --link-code <code> skips browser login when provided by Dashboard.",
       "  - hooks and plugins are installed or removed manually from the local Dashboard.",
       "  - serve refreshes all local usage sources every five minutes; use Sync now for an immediate refresh.",
+      "  - configure multiple Codex scan roots in Dashboard Settings > Integrations; saved roots override CODEX_HOME.",
       "  - auto sync waits for a device token.",
       "  - optional: --dashboard-url for hosted landing.",
       "  - sync parses ~/.codex/sessions/**/rollout-*.jsonl and ~/.code/sessions/**/rollout-*.jsonl, then uploads token deltas.",

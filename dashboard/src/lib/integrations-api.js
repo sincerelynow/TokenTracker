@@ -1,6 +1,19 @@
 import { getLocalApiAuthHeaders } from "./local-api-auth";
 
 const INTEGRATIONS_PATH = "/functions/tokentracker-integrations";
+export const LOCAL_USAGE_SYNCED_EVENT = "tokentracker:local-usage-synced";
+
+export function emitLocalUsageSynced(target = window) {
+  target.dispatchEvent(new Event(LOCAL_USAGE_SYNCED_EVENT));
+}
+
+export function subscribeLocalUsageSynced(refresh, { target = window, onError = () => {} } = {}) {
+  const handler = () => {
+    void Promise.resolve(refresh()).catch(onError);
+  };
+  target.addEventListener(LOCAL_USAGE_SYNCED_EVENT, handler);
+  return () => target.removeEventListener(LOCAL_USAGE_SYNCED_EVENT, handler);
+}
 
 async function readPayload(response) {
   const payload = await response.json().catch(() => null);

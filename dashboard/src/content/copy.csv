@@ -479,6 +479,20 @@ settings.integrations.sync_success,ui,SettingsPage,IntegrationsSection,sync_succ
 settings.integrations.sync_error,ui,SettingsPage,IntegrationsSection,sync_error,"Statistics sync failed: {{error}}",,active
 settings.integrations.confirm.title,ui,SettingsPage,IntegrationsSection,confirm_title,"Uninstall integration?",,active
 settings.integrations.confirm.description,ui,SettingsPage,IntegrationsSection,confirm_description,"Remove the TokenTracker-managed integration from {{provider}}? Other configuration is preserved.",,active
+settings.codex_roots.title,ui,SettingsPage,CodexRootsSettings,title,"Codex scan roots",,active
+settings.codex_roots.subtitle,ui,SettingsPage,CodexRootsSettings,subtitle,"Choose the local Codex homes scanned for sessions. Changes apply to the next sync.",,active
+settings.codex_roots.add,ui,SettingsPage,CodexRootsSettings,add,"Add root",,active
+settings.codex_roots.path,ui,SettingsPage,CodexRootsSettings,path,"Codex root {{index}}",,active
+settings.codex_roots.placeholder,ui,SettingsPage,CodexRootsSettings,placeholder,"For example: ~/.codex",,active
+settings.codex_roots.remove,ui,SettingsPage,CodexRootsSettings,remove,"Remove Codex root {{index}}",,active
+settings.codex_roots.duplicate,ui,SettingsPage,CodexRootsSettings,duplicate,"This root is already listed.",,active
+settings.codex_roots.detected,ui,SettingsPage,CodexRootsSettings,detected,"Sessions detected",,active
+settings.codex_roots.not_detected,ui,SettingsPage,CodexRootsSettings,not_detected,"No sessions detected yet",,active
+settings.codex_roots.wsl_detected,ui,SettingsPage,CodexRootsSettings,wsl_detected,"WSL sessions are also detected at {{path}}.",,active
+settings.codex_roots.save,ui,SettingsPage,CodexRootsSettings,save,"Save roots",,active
+settings.codex_roots.saving,ui,SettingsPage,CodexRootsSettings,saving,"Saving...",,active
+settings.codex_roots.saved,ui,SettingsPage,CodexRootsSettings,saved,"Codex scan roots saved.",,active
+settings.codex_roots.error,ui,SettingsPage,CodexRootsSettings,error,"Could not save Codex roots: {{error}}",,active
 settings.network.mode.label,ui,SettingsPage,NetworkSection,mode_label,"Outbound proxy",,active
 settings.network.mode.hint,ui,SettingsPage,NetworkSection,mode_hint,"Choose how Token Tracker reaches the internet for cloud sync. App updates always follow the system proxy.",,active
 settings.network.mode.system,ui,SettingsPage,NetworkSection,mode_system,"System",,active

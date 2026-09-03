@@ -4,14 +4,19 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const cp = require("node:child_process");
 const { test } = require("node:test");
+const { DatabaseSync } = require("node:sqlite");
 
 const { cmdStatus } = require("../src/commands/status");
 const { mockPlatform, mockMethod } = require("./helpers/mock");
+const { withHome } = require("./helpers/with-home");
 
 function runSql(dbPath, sql) {
-  cp.execFileSync("sqlite3", [dbPath, sql], {
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec(sql);
+  } finally {
+    db.close();
+  }
 }
 
 test("status prints last upload timestamps from upload.throttle.json", async () => {
@@ -145,6 +150,33 @@ test("status reports Codex notify unset when config points to another command", 
     else process.env.CODEX_HOME = prevCodexHome;
     await fs.rm(tmp, { recursive: true, force: true });
   }
+});
+
+test("status prints every configured Codex session root", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-status-roots-"));
+  const restoreHome = withHome(home);
+  const previousCodexHome = process.env.CODEX_HOME;
+  const previousWrite = process.stdout.write;
+  t.after(async () => {
+    process.stdout.write = previousWrite;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    restoreHome();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+  delete process.env.CODEX_HOME;
+  const trackerDir = path.join(home, ".tokentracker", "tracker");
+  const roots = [path.join(home, ".codex"), path.join(home, ".codex-ipc")];
+  await fs.mkdir(path.join(roots[0], "sessions"), { recursive: true });
+  await fs.mkdir(path.join(roots[1], "archived_sessions"), { recursive: true });
+  await fs.mkdir(trackerDir, { recursive: true });
+  await fs.writeFile(path.join(trackerDir, "config.json"), `${JSON.stringify({ codexHomes: roots })}\n`);
+  let output = "";
+  process.stdout.write = (chunk) => { output += String(chunk); return true; };
+
+  await cmdStatus();
+  assert.match(output, /configured: .*\.codex/);
+  assert.match(output, /configured: .*\.codex-ipc/);
 });
 
 test("status JSON reports Copilot canonical store diagnostics", async () => {

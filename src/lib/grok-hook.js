@@ -4,6 +4,7 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 
 const GROK_HOOK_FILENAME = "99-tokentracker-usage.json";
+const GROK_MANAGED_MARKER = "tokentracker-managed-grok-hook-v1";
 
 function resolveGrokHome(env = process.env) {
   if (env.TOKENTRACKER_GROK_HOME && env.TOKENTRACKER_GROK_HOME.length > 0) {
@@ -41,6 +42,7 @@ function buildGrokSessionEndHookJson(
     ? `${windowsCommandQuote(execPath)} ${windowsCommandQuote(notifyGrokHandlerPath)}`
     : `/usr/bin/env node ${shellQuote(notifyGrokHandlerPath)}`;
   return {
+    tokentracker: { managed: true, marker: GROK_MANAGED_MARKER },
     hooks: {
       SessionEnd: [
         {
@@ -74,13 +76,23 @@ async function ensureGrokHookFiles({
     throw new Error("grokHooksDir and trackerDir are required");
   }
 
-  await fs.mkdir(grokHooksDir, { recursive: true });
-
   const hookPath = path.join(grokHooksDir, GROK_HOOK_FILENAME);
   const binDir = resolveTrackerBinDir(trackerDir);
-  await fs.mkdir(binDir, { recursive: true });
-
   const handlerPath = path.join(binDir, "grok-session-end-hook.cjs");
+
+  if (fssync.existsSync(hookPath) && !isManagedGrokHookFile(hookPath)) {
+    const error = new Error(`Refusing to overwrite non-TokenTracker Grok hook: ${hookPath}`);
+    error.code = "GROK_HOOK_NOT_MANAGED";
+    throw error;
+  }
+  if (fssync.existsSync(handlerPath) && !isManagedGrokHandlerFile(handlerPath)) {
+    const error = new Error(`Refusing to overwrite non-TokenTracker Grok handler: ${handlerPath}`);
+    error.code = "GROK_HANDLER_NOT_MANAGED";
+    throw error;
+  }
+
+  await fs.mkdir(grokHooksDir, { recursive: true });
+  await fs.mkdir(binDir, { recursive: true });
 
   // Write the hook JSON (always overwrite to keep command up-to-date if bin path changes)
   const hookJson = buildGrokSessionEndHookJson({ notifyGrokHandlerPath: handlerPath });
@@ -108,6 +120,7 @@ function buildGrokSessionEndHandler({ trackerDir }) {
   // 4. Writes a signal file under trackerDir that sync.js will pick up on next run
 
   return `#!/usr/bin/env node
+// ${GROK_MANAGED_MARKER}
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -268,6 +281,24 @@ main().catch(() => process.exit(0));
 `;
 }
 
+function isManagedGrokHookFile(filePath) {
+  try {
+    const json = JSON.parse(fssync.readFileSync(filePath, "utf8"));
+    return json?.tokentracker?.managed === true
+      && json?.tokentracker?.marker === GROK_MANAGED_MARKER;
+  } catch {
+    return false;
+  }
+}
+
+function isManagedGrokHandlerFile(filePath) {
+  try {
+    return fssync.readFileSync(filePath, "utf8").includes(`// ${GROK_MANAGED_MARKER}`);
+  } catch {
+    return false;
+  }
+}
+
 async function probeGrokHookState({ home = os.homedir(), trackerDir, env = process.env } = {}) {
   const grokHooksDir = resolveGrokHooksDir(env);
   const hookPath = path.join(grokHooksDir, GROK_HOOK_FILENAME);
@@ -283,7 +314,11 @@ async function probeGrokHookState({ home = os.homedir(), trackerDir, env = proce
     try {
       const content = fssync.readFileSync(hookPath, "utf8");
       const json = JSON.parse(content);
-      configured = Boolean(json?.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command?.includes("grok-session-end-hook"));
+      configured = Boolean(
+        json?.tokentracker?.managed === true
+        && json?.tokentracker?.marker === GROK_MANAGED_MARKER
+        && json?.hooks?.SessionEnd?.[0]?.hooks?.[0]?.command?.includes("grok-session-end-hook")
+      );
     } catch {}
   }
 
@@ -325,20 +360,20 @@ async function removeGrokHook({ home = os.homedir(), trackerDir, env = process.e
 
   let removed = false;
   try {
-    if (fssync.existsSync(hookPath)) {
+    if (fssync.existsSync(hookPath) && isManagedGrokHookFile(hookPath)) {
       fssync.unlinkSync(hookPath);
       removed = true;
     }
   } catch {}
   try {
-    if (fssync.existsSync(handlerPath)) {
+    if (fssync.existsSync(handlerPath) && isManagedGrokHandlerFile(handlerPath)) {
       fssync.unlinkSync(handlerPath);
       removed = true;
     }
   } catch {}
   if (legacyHandlerPath !== handlerPath) {
     try {
-      if (fssync.existsSync(legacyHandlerPath)) {
+      if (fssync.existsSync(legacyHandlerPath) && isManagedGrokHandlerFile(legacyHandlerPath)) {
         fssync.unlinkSync(legacyHandlerPath);
         removed = true;
       }
@@ -356,5 +391,6 @@ module.exports = {
   probeGrokHookState,
   removeGrokHook,
   GROK_HOOK_FILENAME,
+  GROK_MANAGED_MARKER,
   buildGrokSessionEndHandler
 };

@@ -3,20 +3,18 @@ type: SEP
 version: 1.2
 title: "Dashboard 手动管理统计集成"
 change_id: "001-manage-integrations-in-dashboard"
-status: draft
+status: ready_to_archive
 plan_revision: 2
-approved_revision: null
-approved_by: ""
-approved_at: ""
-approval_evidence: ""
+approved_revision: 2
+approved_by: "User"
+approved_at: "2026-09-03T20:15:45+08:00"
+approval_evidence: "用户消息：openspec\\changes\\001-manage-integrations-in-dashboard 批准执行 plan_revision: 2"
 archive_approved_by: ""
 archive_approved_at: ""
 archive_approval_evidence: ""
 execution_mode: implementation-to-ready-to-archive
 task_ledger: "openspec/changes/001-manage-integrations-in-dashboard/tasks.md"
 verification_record: "openspec/changes/001-manage-integrations-in-dashboard/verification.md"
-blocked_from: ""
-blocked_reason: ""
 archived_at: ""
 archive_path: ""
 created_by:

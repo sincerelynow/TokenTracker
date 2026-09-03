@@ -99,6 +99,7 @@ const {
 const wsl = require("../lib/wsl-probe");
 const { getWslMode, isInvalidWslMode, shouldProbeWsl, discoverWslHome } = wsl;
 const { resolveInstallPaths, resolveZcodeNativeDbPath } = require("../lib/install-resolver");
+const { resolveCodexRootsSync } = require("../lib/codex-roots");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
 const { probeOmpHookState } = require("../lib/omp-hook");
 
@@ -586,15 +587,10 @@ async function cmdStatus(argv = []) {
   // (union + requireAnyChild, see src/commands/sync.js): status is the tool
   // users are asked to paste when Codex usage looks wrong, so it must list
   // every root sync actually walks — and no empty shell sync would skip.
-  const codexPaths = resolveInstallPaths({
-    nativeValue: process.env.CODEX_HOME || path.join(home, ".codex"),
-    wslDir: ".codex",
-    requireAnyChild: ["sessions", "archived_sessions"],
-    union: true,
-  });
-  // Both children, matching requireAnyChild above: an install holding only
-  // archived_sessions/ is counted by sync and must not read as "not detected".
-  const codexActive = formatResolvedPaths(codexPaths, ["sessions", "archived_sessions"]);
+  const codexRootState = resolveCodexRootsSync({ home, trackerDir, env: process.env });
+  const codexActive = codexRootState.roots
+    .filter((root) => root.has_sessions || root.has_archived_sessions)
+    .map((root) => `${root.origin}: ${root.path}`);
   const codexInstalledStatus = codexActive.length > 0;
 
   // Kimi (passive sessions scan)

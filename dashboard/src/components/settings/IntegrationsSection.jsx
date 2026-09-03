@@ -4,8 +4,10 @@ import { triggerLocalSync } from "../../lib/api";
 import { copy } from "../../lib/copy";
 import { Button, ConfirmModal } from "../../ui/components";
 import { SectionCard, SettingsRow } from "./Controls.jsx";
+import { CodexRootsSettings } from "./CodexRootsSettings.jsx";
+import { emitLocalUsageSynced } from "../../lib/integrations-api";
 
-export function IntegrationsSection({ integrationState }) {
+export function IntegrationsSection({ integrationState, codexRootsState = null }) {
   const { integrations, error, pendingProvider, mutate, refresh = async () => {} } = integrationState;
   const [uninstallTarget, setUninstallTarget] = useState(null);
   const [syncState, setSyncState] = useState("idle");
@@ -26,6 +28,7 @@ export function IntegrationsSection({ integrationState }) {
     try {
       await triggerLocalSync();
       await refresh();
+      emitLocalUsageSynced();
       setSyncState("success");
     } catch (nextError) {
       setSyncError(nextError);
@@ -82,6 +85,8 @@ export function IntegrationsSection({ integrationState }) {
         {syncState === "success" ? <p role="status" className="py-2 text-xs text-emerald-600 dark:text-emerald-400">{copy("settings.integrations.sync_success")}</p> : null}
         {syncState === "error" ? <p role="alert" className="py-2 text-xs text-red-600 dark:text-red-400">{copy("settings.integrations.sync_error", { error: syncError?.message || "" })}</p> : null}
       </SectionCard>
+
+      {codexRootsState?.available ? <CodexRootsSettings rootsState={codexRootsState} /> : null}
 
       <ConfirmModal
         open={Boolean(uninstallTarget)}

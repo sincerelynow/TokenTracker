@@ -1505,7 +1505,9 @@ function splitEnvString(value) {
       escaped = false;
       continue;
     }
-    if (ch === '\\\\' && quote !== "'") {
+    const next = value[i + 1];
+    const escapesNext = next === '\\\\' || next === '"' || next === "'" || /\\s/.test(next || '');
+    if (ch === '\\\\' && quote !== "'" && escapesNext) {
       escaped = true;
       continue;
     }

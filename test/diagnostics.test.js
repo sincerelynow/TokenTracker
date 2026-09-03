@@ -6,6 +6,7 @@ const { test } = require("node:test");
 
 const { cmdDiagnostics } = require("../src/commands/diagnostics");
 const { collectTrackerDiagnostics } = require("../src/lib/diagnostics");
+const { GROK_MANAGED_MARKER } = require("../src/lib/grok-hook");
 const { withHome } = require("./helpers/with-home");
 
 test("diagnostics redacts device token and home paths", async () => {
@@ -51,10 +52,11 @@ test("diagnostics redacts device token and home paths", async () => {
       `notify = ["/usr/bin/env", "node", "${path.join(tmp, ".tokentracker", "bin", "notify.cjs")}"]\n`,
       "utf8",
     );
-    await fs.writeFile(grokHandlerPath, "handler\n", "utf8");
+    await fs.writeFile(grokHandlerPath, `// ${GROK_MANAGED_MARKER}\nhandler\n`, "utf8");
     await fs.writeFile(
       grokHookPath,
       JSON.stringify({
+        tokentracker: { managed: true, marker: GROK_MANAGED_MARKER },
         hooks: {
           SessionEnd: [
             { hooks: [{ type: "command", command: `/usr/bin/env node ${grokHandlerPath}` }] },
@@ -136,7 +138,7 @@ test("diagnostics reports TokenTracker-prefixed Grok home override", async () =>
 
     const data = await collectTrackerDiagnostics({ home: tmp });
 
-    assert.equal(data.paths.grok_home, "~/.grok-prefixed");
+    assert.equal(data.paths.grok_home, path.join("~", ".grok-prefixed"));
   } finally {
     if (prevTokenTrackerGrokHome === undefined) delete process.env.TOKENTRACKER_GROK_HOME;
     else process.env.TOKENTRACKER_GROK_HOME = prevTokenTrackerGrokHome;
@@ -157,4 +159,21 @@ test("diagnostics does not migrate legacy root", async () => {
 
   await fs.stat(legacyRoot);
   await assert.rejects(() => fs.stat(path.join(home, ".tokentracker")));
+});
+
+test("diagnostics reports every configured Codex root", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-diagnostics-roots-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const trackerDir = path.join(home, ".tokentracker", "tracker");
+  const roots = [path.join(home, ".codex"), path.join(home, ".codex-ipc")];
+  await fs.mkdir(path.join(roots[0], "sessions"), { recursive: true });
+  await fs.mkdir(path.join(roots[1], "archived_sessions"), { recursive: true });
+  await fs.mkdir(trackerDir, { recursive: true });
+  await fs.writeFile(path.join(trackerDir, "config.json"), `${JSON.stringify({ codexHomes: roots })}\n`);
+
+  const data = await collectTrackerDiagnostics({ home });
+  assert.equal(data.paths.codex_roots.length, 2);
+  assert.deepEqual(data.paths.codex_roots.map((root) => root.origin), ["configured", "configured"]);
+  assert.equal(data.paths.codex_roots[0].has_sessions, true);
+  assert.equal(data.paths.codex_roots[1].has_archived_sessions, true);
 });

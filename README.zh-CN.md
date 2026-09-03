@@ -94,6 +94,7 @@ brew install xiufengsun/tokentracker/tokentracker
 - 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
 - 🚀 **启动零改动** —— 首次运行不会修改 AI 工具配置；可在 Dashboard 手动管理可选集成
 - 🔄 **定时统计** —— CLI `serve` 每五分钟刷新全部本地来源，也可在设置 → 集成中点击“立即统计”
+- 📁 **多个 Codex 目录** —— 可在设置 → 集成中配置多个 Codex home；保存后的列表优先于 `CODEX_HOME`，移除目录只停止后续扫描，不删除历史统计
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
 - 🖥️ **原生桌面 App** —— macOS 菜单栏（含桌面小组件）与 Windows 系统托盘，各自内嵌服务 + 原生 WebView Dashboard
 - 🎨 **4 种桌面小组件** —— 用量 / 热力图 / 热门模型 / 使用限额 直接钉桌面

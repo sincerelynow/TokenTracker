@@ -760,5 +760,19 @@
   "settings.integrations.sync_success": "统计数据已更新。",
   "settings.integrations.sync_error": "统计失败：{{error}}",
   "settings.integrations.confirm.title": "卸载集成？",
-  "settings.integrations.confirm.description": "从 {{provider}} 移除由 TokenTracker 管理的集成？其他配置将保留。"
+  "settings.integrations.confirm.description": "从 {{provider}} 移除由 TokenTracker 管理的集成？其他配置将保留。",
+  "settings.codex_roots.title": "Codex 扫描目录",
+  "settings.codex_roots.subtitle": "选择用于扫描会话的本地 Codex 目录，更改将在下次统计时生效。",
+  "settings.codex_roots.add": "添加目录",
+  "settings.codex_roots.path": "Codex 目录 {{index}}",
+  "settings.codex_roots.placeholder": "例如：~/.codex",
+  "settings.codex_roots.remove": "移除 Codex 目录 {{index}}",
+  "settings.codex_roots.duplicate": "此目录已在列表中。",
+  "settings.codex_roots.detected": "已检测到会话",
+  "settings.codex_roots.not_detected": "尚未检测到会话",
+  "settings.codex_roots.wsl_detected": "同时检测到 WSL 会话目录 {{path}}。",
+  "settings.codex_roots.save": "保存目录",
+  "settings.codex_roots.saving": "保存中...",
+  "settings.codex_roots.saved": "Codex 扫描目录已保存。",
+  "settings.codex_roots.error": "无法保存 Codex 目录：{{error}}"
 }

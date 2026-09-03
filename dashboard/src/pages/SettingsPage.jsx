@@ -17,6 +17,7 @@ import { NetworkSection } from "../components/settings/NetworkSection.jsx";
 import { LIMIT_DISPLAY_MODES, useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
 import { useNativeSettings } from "../hooks/use-native-settings.js";
 import { useIntegrations } from "../hooks/use-integrations.js";
+import { useCodexRoots } from "../hooks/use-codex-roots.js";
 import { useProxySettings } from "../hooks/use-proxy-settings.js";
 import { cn } from "../lib/cn";
 import { copy } from "../lib/copy";
@@ -53,6 +54,7 @@ export function SettingsPage() {
   } = useNativeSettings();
   const proxySettings = useProxySettings();
   const integrations = useIntegrations();
+  const codexRoots = useCodexRoots();
   const { available: proxySettingsAvailable } = proxySettings;
   const toastOnReset = nativeSettings?.toastOnReset !== false;
   const confettiOnReset = nativeSettings?.confettiOnReset !== false;
@@ -107,7 +109,7 @@ export function SettingsPage() {
           id: SETTINGS_SECTION_IDS.INTEGRATIONS,
           label: copy("settings.section.integrations"),
           Icon: Plug,
-          content: <IntegrationsSection integrationState={integrations} />,
+          content: <IntegrationsSection integrationState={integrations} codexRootsState={codexRoots} />,
         }]
       : []),
     {

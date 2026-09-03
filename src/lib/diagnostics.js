@@ -19,6 +19,7 @@ const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin")
 const { probeGrokHookState } = require("./grok-hook");
 const { resolveTrackerPaths } = require("./tracker-paths");
 const wsl = require("./wsl-probe");
+const { resolveCodexRootsSync } = require("./codex-roots");
 // TASK-011: Kiro paths inlined here to avoid pulling the ~4000-line
 // rollout module on every `tokentracker status` / `diagnostics` call.
 // rollout.js still exports resolveKiroCliDbPath / resolveKiroBasePath for
@@ -66,10 +67,26 @@ function resolveKiroCliDbPathInline(env, home) {
 
 async function collectTrackerDiagnostics({
   home = os.homedir(),
-  codexHome = process.env.CODEX_HOME || path.join(home, ".codex"),
+  codexHome = null,
   codeHome = process.env.CODE_HOME || path.join(home, ".code"),
 } = {}) {
   const { trackerDir, binDir } = await resolveTrackerPaths({ home });
+  const codexRootState = codexHome
+    ? {
+        roots: [{
+          path: path.resolve(codexHome),
+          origin: "override",
+          exists: require("node:fs").existsSync(codexHome),
+          has_sessions: require("node:fs").existsSync(path.join(codexHome, "sessions")),
+          has_archived_sessions: require("node:fs").existsSync(path.join(codexHome, "archived_sessions")),
+        }],
+        configured: false,
+        source: "override",
+      }
+    : resolveCodexRootsSync({ home, trackerDir, env: process.env });
+  const primaryCodexHome = codexRootState.roots.find((root) => root.origin !== "wsl")?.path
+    || codexRootState.roots[0]?.path
+    || path.join(home, ".codex");
   const configPath = path.join(trackerDir, "config.json");
   const queuePath = path.join(trackerDir, "queue.jsonl");
   const queueStatePath = path.join(trackerDir, "queue.state.json");
@@ -80,7 +97,7 @@ async function collectTrackerDiagnostics({
   const uploadThrottlePath = path.join(trackerDir, "upload.throttle.json");
   const autoRetryPath = path.join(trackerDir, "auto.retry.json");
   const syncSkipPath = path.join(trackerDir, "sync.skip.json");
-  const codexConfigPath = path.join(codexHome, "config.toml");
+  const codexConfigPath = path.join(primaryCodexHome, "config.toml");
   const codeConfigPath = path.join(codeHome, "config.toml");
   const claudeConfigPath = path.join(home, ".claude", "settings.json");
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
@@ -191,7 +208,11 @@ async function collectTrackerDiagnostics({
     },
     paths: {
       tracker_dir: redactValue(trackerDir, home),
-      codex_home: redactValue(codexHome, home),
+      codex_home: redactValue(primaryCodexHome, home),
+      codex_roots: codexRootState.roots.map((root) => ({
+        ...root,
+        path: redactValue(root.path, home),
+      })),
       codex_config: redactValue(codexConfigPath, home),
       code_home: redactValue(codeHome, home),
       code_config: redactValue(codeConfigPath, home),

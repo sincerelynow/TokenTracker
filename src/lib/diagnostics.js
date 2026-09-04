@@ -71,8 +71,9 @@ async function collectTrackerDiagnostics({
   codeHome = process.env.CODE_HOME || path.join(home, ".code"),
 } = {}) {
   const { trackerDir, binDir } = await resolveTrackerPaths({ home });
-  const codexRootState = codexHome
-    ? {
+  let codexRootState;
+  if (codexHome) {
+    codexRootState = {
         roots: [{
           path: path.resolve(codexHome),
           origin: "override",
@@ -82,8 +83,20 @@ async function collectTrackerDiagnostics({
         }],
         configured: false,
         source: "override",
-      }
-    : resolveCodexRootsSync({ home, trackerDir, env: process.env });
+      };
+  } else {
+    try {
+      codexRootState = resolveCodexRootsSync({ home, trackerDir, env: process.env });
+    } catch {
+      // The config diagnostics below report malformed config as critical. Keep
+      // collecting the remaining checks instead of aborting doctor early.
+      codexRootState = {
+        roots: [],
+        configured: false,
+        source: "invalid_config",
+      };
+    }
+  }
   const primaryCodexHome = codexRootState.roots.find((root) => root.origin !== "wsl")?.path
     || codexRootState.roots[0]?.path
     || path.join(home, ".codex");

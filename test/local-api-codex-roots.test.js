@@ -99,9 +99,17 @@ describe("local Codex roots API", () => {
     assert.equal(saved.status, 200);
     assert.equal(saved.body.configured, true);
     assert.deepEqual(saved.body.roots.map((root) => root.path), [first, second]);
+    assert.deepEqual(saved.body.roots.map((root) => root.label), ["CODEX", "CODEX_IPC"]);
+    assert.equal(new Set(saved.body.roots.map((root) => root.key)).size, 2);
+    assert.ok(saved.body.roots.every((root) => root.stats_source === `codex-root:${root.key}`));
     assert.equal(saved.body.roots[0].has_sessions, true);
     assert.equal(saved.body.roots[1].has_archived_sessions, true);
-    assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")).keep, { value: 1 });
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    assert.deepEqual(config.keep, { value: 1 });
+    assert.deepEqual(config.codexHomes.map((root) => root.path), [first, second]);
+
+    const reloaded = await call(handler, { pathname: "/functions/tokentracker-codex-roots", headers });
+    assert.deepEqual(reloaded.body.roots.map((root) => root.key), saved.body.roots.map((root) => root.key));
   });
 
   it("rejects invalid input without changing the config", async () => {

@@ -711,9 +711,11 @@
   "settings.codex_roots.duplicate": "此目錄已在清單中。",
   "settings.codex_roots.detected": "已偵測到工作階段",
   "settings.codex_roots.not_detected": "尚未偵測到工作階段",
+  "settings.codex_roots.stats_label": "用量卡片：{{label}}",
   "settings.codex_roots.wsl_detected": "同時偵測到 WSL 工作階段目錄 {{path}}。",
   "settings.codex_roots.save": "儲存目錄",
   "settings.codex_roots.saving": "儲存中...",
   "settings.codex_roots.saved": "Codex 掃描目錄已儲存。",
-  "settings.codex_roots.error": "無法儲存 Codex 目錄：{{error}}"
+  "settings.codex_roots.error": "無法儲存 Codex 目錄：{{error}}",
+  "usage.overview.codex_all": "CODEX ALL"
 }

@@ -198,7 +198,7 @@ test("unknown notify source falls back to full scan instead of skipping everythi
 
     assert.ok(count > 0, "unknown source should degrade to a full scan");
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":17/);
   });
 });
@@ -245,7 +245,7 @@ test("legacy retry auto sync without source remains a full scan", async () => {
 
     assert.ok(count > 0, "retry without a source should preserve the legacy full scan");
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":23/);
   });
 });
@@ -491,7 +491,7 @@ test("manual sync remains a full scan and discovers Codex usage", async () => {
 
     assert.ok(count > 0, "manual sync must enumerate Codex sessions");
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":33/);
   });
 });
@@ -514,7 +514,7 @@ test("full auto sync still scans flat Codex archives", async () => {
 
     assert.ok(count > 0, "full auto sync must enumerate archived Codex sessions");
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":29/);
   });
 });
@@ -585,7 +585,7 @@ test("background auto sync stays bounded and skips deep Codex archives", async (
 
     assert.equal(count, 0, "background auto sync must not enumerate archived Codex sessions");
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":31/);
     assert.doesNotMatch(queue, /"total_tokens":47/);
   });
@@ -616,7 +616,7 @@ test("background auto sync does not enumerate broad provider roots", async () =>
 
     assert.equal(count, 0, "background auto sync must not walk broad non-bounded provider roots");
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":22/);
   });
 });
@@ -670,7 +670,7 @@ test("lightweight flag is an alias for bounded background sync", async () => {
     await cmdSync(["--auto", "--lightweight"]);
 
     const queue = await fs.readFile(path.join(home, ".tokentracker", "tracker", "queue.jsonl"), "utf8");
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[^"]+"/);
     assert.match(queue, /"total_tokens":36/);
     assert.doesNotMatch(queue, /"total_tokens":58/);
   });

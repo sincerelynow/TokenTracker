@@ -279,6 +279,12 @@ test("usage-category-breakdown supports codex source", async () => {
         }),
       ].join("\n") + "\n",
     );
+    const trackerDir = path.join(tmp, ".tokentracker", "tracker");
+    await fs.promises.mkdir(trackerDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(trackerDir, "config.json"),
+      `${JSON.stringify({ codexHomes: [path.join(tmp, ".codex")] })}\n`,
+    );
 
     restoreHome = withHome(tmp);
     const result = await callEndpoint(

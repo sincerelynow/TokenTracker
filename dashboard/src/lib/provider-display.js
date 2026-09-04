@@ -53,6 +53,12 @@ export function formatProviderDisplayName(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
 
+  if (/^codex[-_ ]all$/i.test(raw)) return copy("usage.overview.codex_all");
+  if (/^codex-root:/i.test(raw)) {
+    const key = raw.slice(raw.indexOf(":") + 1).replace(/-[0-9a-f]{8}$/i, "");
+    return (key || "codex").replace(/-/g, "_").toUpperCase();
+  }
+
   const normalized = normalizedProviderKey(raw);
   if (normalized === "primeagent") return "Prime Agent";
   if (normalized.startsWith("primeagent") && normalized.length > "primeagent".length) {

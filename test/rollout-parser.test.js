@@ -675,6 +675,81 @@ test("parseRolloutIncremental emits project usage buckets with canonicalized pro
   }
 });
 
+test("parseRolloutIncremental keeps same-hour Codex root usage separate in hourly and project buckets", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-roots-"));
+  try {
+    const repoRoot = path.join(tmp, "repo");
+    await fs.mkdir(path.join(repoRoot, ".git"), { recursive: true });
+    await fs.writeFile(
+      path.join(repoRoot, ".git", "config"),
+      `[remote "origin"]\n\turl = https://github.com/acme/roots.git\n`,
+      "utf8",
+    );
+    const firstRollout = path.join(repoRoot, ".codex", "sessions", "rollout-first.jsonl");
+    const secondRollout = path.join(repoRoot, ".codex-ipc", "sessions", "rollout-second.jsonl");
+    await fs.mkdir(path.dirname(firstRollout), { recursive: true });
+    await fs.mkdir(path.dirname(secondRollout), { recursive: true });
+    const firstUsage = {
+      input_tokens: 10,
+      cached_input_tokens: 0,
+      output_tokens: 2,
+      reasoning_output_tokens: 0,
+      total_tokens: 12,
+    };
+    const secondUsage = {
+      input_tokens: 20,
+      cached_input_tokens: 0,
+      output_tokens: 4,
+      reasoning_output_tokens: 0,
+      total_tokens: 24,
+    };
+    await fs.writeFile(
+      firstRollout,
+      `${buildTokenCountLine({ ts: "2025-12-17T00:10:00.000Z", last: firstUsage, total: firstUsage })}\n`,
+    );
+    await fs.writeFile(
+      secondRollout,
+      `${buildTokenCountLine({ ts: "2025-12-17T00:20:00.000Z", last: secondUsage, total: secondUsage })}\n`,
+    );
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const projectQueuePath = path.join(tmp, "project.queue.jsonl");
+    await parseRolloutIncremental({
+      rolloutFiles: [
+        { path: firstRollout, source: "codex", statsSource: "codex-root:codex-12345678" },
+        { path: secondRollout, source: "codex", statsSource: "codex-root:codex-ipc-87654321" },
+      ],
+      cursors: { version: 1, files: {}, updatedAt: null },
+      queuePath,
+      projectQueuePath,
+      publicRepoResolver: async ({ projectRef }) => ({
+        status: "public_verified",
+        projectKey: "acme/roots",
+        projectRef,
+      }),
+    });
+
+    const rows = await readJsonLines(queuePath);
+    assert.deepEqual(
+      rows.map((row) => [row.source, row.total_tokens]).sort(),
+      [
+        ["codex-root:codex-12345678", 12],
+        ["codex-root:codex-ipc-87654321", 24],
+      ],
+    );
+    const projectRows = await readJsonLines(projectQueuePath);
+    assert.deepEqual(
+      projectRows.map((row) => [row.source, row.total_tokens]).sort(),
+      [
+        ["codex-root:codex-12345678", 12],
+        ["codex-root:codex-ipc-87654321", 24],
+      ],
+    );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental uses turn_context cwd to resolve project context", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-rollout-"));
   try {

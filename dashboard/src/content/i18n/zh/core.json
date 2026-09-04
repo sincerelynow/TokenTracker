@@ -770,9 +770,11 @@
   "settings.codex_roots.duplicate": "此目录已在列表中。",
   "settings.codex_roots.detected": "已检测到会话",
   "settings.codex_roots.not_detected": "尚未检测到会话",
+  "settings.codex_roots.stats_label": "用量卡片：{{label}}",
   "settings.codex_roots.wsl_detected": "同时检测到 WSL 会话目录 {{path}}。",
   "settings.codex_roots.save": "保存目录",
   "settings.codex_roots.saving": "保存中...",
   "settings.codex_roots.saved": "Codex 扫描目录已保存。",
-  "settings.codex_roots.error": "无法保存 Codex 目录：{{error}}"
+  "settings.codex_roots.error": "无法保存 Codex 目录：{{error}}",
+  "usage.overview.codex_all": "CODEX ALL"
 }

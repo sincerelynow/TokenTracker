@@ -683,7 +683,7 @@ function ToolCallsExpanded({ toolSet, execDetails, source, codexQueueFallback })
 
 // Inline Context Breakdown for Claude Code only. Renders bare (no Card
 // wrapper) so it can drop into the UsageOverview expanded provider section.
-export function ContextBreakdownPanel({ from, to, source = "claude", referenceTotalTokens = null, onLoadingChange = null }) {
+export function ContextBreakdownPanel({ from, to, source = "claude", requestSource = source, referenceTotalTokens = null, onLoadingChange = null }) {
   const { formatTokens } = useTokenFormat();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -701,7 +701,7 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
 
   useEffect(() => {
     let cancelled = false;
-    const cacheKey = `${from || ""}|${to || ""}|${source || "claude"}`;
+    const cacheKey = `${from || ""}|${to || ""}|${requestSource || source || "claude"}`;
     const cached = cacheRef.current[cacheKey];
     // On a cache miss, reset data so the previous source's payload never
     // renders under the new source's display branch while the fetch runs.
@@ -712,7 +712,7 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
     getUsageCategoryBreakdown({
       from,
       to,
-      source,
+      source: requestSource,
       timeZone: getBrowserTimeZone(),
       tzOffsetMinutes: getBrowserTimeZoneOffsetMinutes(),
     })
@@ -735,7 +735,7 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, source]);
+  }, [from, to, source, requestSource]);
 
   // No internal header — the parent (UsageOverview) renders the title and
   // receives loading state via onLoadingChange so the spinner sits inline

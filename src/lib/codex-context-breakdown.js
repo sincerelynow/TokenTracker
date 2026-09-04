@@ -13,7 +13,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { resolveCodexRootPaths } = require("./codex-roots");
+const { resolveCodexRootsSync } = require("./codex-roots");
 
 const {
   emptyTotals,
@@ -387,6 +387,7 @@ async function computeCodexContextBreakdown({
   exhaustive = false,
   nowMs = Date.now(),
   includeDiagnostics = false,
+  sourceInstance = null,
 } = {}) {
   let fromKey = from;
   let toKey = to;
@@ -398,9 +399,11 @@ async function computeCodexContextBreakdown({
 
   const roots = codexDir
     ? [codexDir]
-    : resolveCodexRootPaths().flatMap((root) => [
-        path.join(root, "sessions"),
-        path.join(root, "archived_sessions"),
+    : resolveCodexRootsSync().roots
+      .filter((root) => !sourceInstance || root.key === sourceInstance)
+      .flatMap((root) => [
+        path.join(root.path, "sessions"),
+        path.join(root.path, "archived_sessions"),
       ]);
   const baseDir = roots.join(path.delimiter);
   const diagnostics = {

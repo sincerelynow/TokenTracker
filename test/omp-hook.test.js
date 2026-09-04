@@ -331,6 +331,7 @@ test("removeOmpHook reports unlink-failed when deletion is blocked", async () =>
 test("applyIntegrationSetup installs omp notify extension without opts ReferenceError", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-init-integration-"));
   const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
   const prevOmpAgent = process.env.TOKENTRACKER_OMP_AGENT_DIR;
   try {
     const home = tmp;
@@ -346,6 +347,7 @@ test("applyIntegrationSetup installs omp notify extension without opts Reference
     );
 
     process.env.HOME = home;
+    delete process.env.CODEX_HOME;
     process.env.TOKENTRACKER_OMP_AGENT_DIR = ompAgentDir;
 
     const notifyPath = path.join(trackerDir, "..", "bin", "notify.cjs");
@@ -368,6 +370,8 @@ test("applyIntegrationSetup installs omp notify extension without opts Reference
   } finally {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
     if (prevOmpAgent === undefined) delete process.env.TOKENTRACKER_OMP_AGENT_DIR;
     else process.env.TOKENTRACKER_OMP_AGENT_DIR = prevOmpAgent;
     await fs.rm(tmp, { recursive: true, force: true });
@@ -377,6 +381,7 @@ test("applyIntegrationSetup installs omp notify extension without opts Reference
 test("applyIntegrationSetup dryRun probes omp without writing extension", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-omp-init-dry-"));
   const prevHome = process.env.HOME;
+  const prevCodexHome = process.env.CODEX_HOME;
   const prevOmpAgent = process.env.TOKENTRACKER_OMP_AGENT_DIR;
   try {
     const home = tmp;
@@ -386,6 +391,7 @@ test("applyIntegrationSetup dryRun probes omp without writing extension", async 
     await fs.mkdir(path.join(ompAgentDir, "sessions"), { recursive: true });
 
     process.env.HOME = home;
+    delete process.env.CODEX_HOME;
     process.env.TOKENTRACKER_OMP_AGENT_DIR = ompAgentDir;
 
     const summary = await applyIntegrationSetup({
@@ -407,6 +413,8 @@ test("applyIntegrationSetup dryRun probes omp without writing extension", async 
   } finally {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = prevCodexHome;
     if (prevOmpAgent === undefined) delete process.env.TOKENTRACKER_OMP_AGENT_DIR;
     else process.env.TOKENTRACKER_OMP_AGENT_DIR = prevOmpAgent;
     await fs.rm(tmp, { recursive: true, force: true });

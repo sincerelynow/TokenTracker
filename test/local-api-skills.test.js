@@ -9,6 +9,7 @@ const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "tt-localapi-skills-")
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
 process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
+delete process.env.CODEX_HOME;
 delete process.env.GROK_HOME;
 delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
 

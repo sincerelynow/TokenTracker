@@ -9,6 +9,7 @@ const { resolveInstallPaths, resolveZcodeNativeDbPath, ensureFlatCursor } = requ
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
 const wsl = require("../lib/wsl-probe");
 const { resolveCodexRootsSync } = require("../lib/codex-roots");
+const { isCodexRootSource } = require("../lib/codex-source");
 const {
   ensureDir,
   readJson,
@@ -241,6 +242,7 @@ const CODEX_FORK_REPLAY_REPAIR_KEY = "codexForkReplayRepair_2026_07";
 // contributing rollout before committing the rebuild. The new key is required
 // so installs that finalized the original migration on a false negative retry.
 const CODEX_USAGE_LINEAGE_REPAIR_KEY = "codexUsageLineageRepair_2026_07_v2";
+const CODEX_ROOT_ATTRIBUTION_REPAIR_KEY = "codexRootAttributionRepair_2026_09";
 const LEGACY_BASE_URL_MIGRATION_NOTE = "reset_after_legacy_baseurl_migration_2026_07";
 // Keep the one escalated desktop refresh bounded; explicit full syncs can retry
 // the same migration without this ceiling when the history needs a deeper scan.
@@ -687,9 +689,9 @@ async function cmdSync(argv, context = {}) {
       // dedups Codex events by sessionUUID:eventTimestamp, so the same session
       // seen under two path spellings collapses instead of double-counting.
       for (const root of codexRootState.roots) {
-        sources.push({ source: "codex", sessionsDir: path.join(root.path, "sessions"), codexInventoryCache: true });
+        sources.push({ source: "codex", statsSource: root.stats_source, sessionsDir: path.join(root.path, "sessions"), codexInventoryCache: true });
         if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
-          sources.push({ source: "codex", sessionsDir: path.join(root.path, "archived_sessions"), deep: true });
+          sources.push({ source: "codex", statsSource: root.stats_source, sessionsDir: path.join(root.path, "archived_sessions"), deep: true });
         }
       }
     }
@@ -730,7 +732,7 @@ async function cmdSync(argv, context = {}) {
       const entry = uniqueSources[sourceIndex];
       const files = sourceFileGroups[sourceIndex];
       for (const filePath of files) {
-        rolloutFiles.push({ path: filePath, source: entry.source });
+        rolloutFiles.push({ path: filePath, source: entry.source, statsSource: entry.statsSource });
       }
     }
 
@@ -762,6 +764,18 @@ async function cmdSync(argv, context = {}) {
         projectQueueStatePath,
         rolloutFiles,
         legacyRepairRan: codexRescanRepairRan || codexForkRepairRan,
+      });
+      await repairCodexRescanInflation({
+        cursors,
+        queuePath,
+        queueStatePath,
+        projectQueuePath,
+        projectQueueStatePath,
+        rolloutFiles,
+        migrationKey: CODEX_ROOT_ATTRIBUTION_REPAIR_KEY,
+        uploadNote: "reset_after_codex_root_attribution_2026_09",
+        attributeCodexRoots: true,
+        preserveLegacyResidual: true,
       });
       await repairDroidDuplicateSessionInflation({ cursors, queuePath, queueStatePath });
       await repairMimoClaudeMislabel({
@@ -3140,6 +3154,7 @@ module.exports = {
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
   CODEX_FORK_REPLAY_REPAIR_KEY,
   CODEX_USAGE_LINEAGE_REPAIR_KEY,
+  CODEX_ROOT_ATTRIBUTION_REPAIR_KEY,
   DROID_DUP_SESSION_REPAIR_KEY,
   CLAUDE_MEM_OBSERVER_REINCLUDE_KEY,
   GROK_APPEND_ONLY_REPAIR_MIGRATION_KEY,
@@ -4882,6 +4897,88 @@ async function repairWorkbuddyContextUsage({
   return true;
 }
 
+const CODEX_RESIDUAL_FIELDS = [
+  "input_tokens",
+  "cached_input_tokens",
+  "cache_creation_input_tokens",
+  "output_tokens",
+  "reasoning_output_tokens",
+  "total_tokens",
+  "billable_total_tokens",
+  "conversation_count",
+];
+
+function codexResidualIdentity(row, project = false) {
+  if (!row || typeof row.hour_start !== "string") return null;
+  if (project) {
+    return typeof row.project_key === "string" && row.project_key
+      ? `${row.project_key}|${row.hour_start}`
+      : null;
+  }
+  const model = typeof row.model === "string" && row.model ? row.model : "unknown";
+  return `${model}|${row.hour_start}`;
+}
+
+function codexBucketAsRow(bucket, key, project = false) {
+  const parts = String(key || "").split("|");
+  const source = typeof bucket?.source === "string" ? bucket.source : (project ? parts[1] : parts[0]);
+  const hourStart = typeof bucket?.hour_start === "string"
+    ? bucket.hour_start
+    : parts.slice(2).join("|");
+  return {
+    ...(bucket?.totals || {}),
+    source,
+    hour_start: hourStart,
+    ...(project
+      ? { project_key: bucket?.project_key || parts[0] }
+      : { model: bucket?.model || parts[1] || "unknown" }),
+  };
+}
+
+function buildCodexLegacyResidualRows({ queueRows, liveBuckets, rebuiltBuckets, project = false }) {
+  const legacy = new Map();
+  const rebuilt = new Map();
+
+  for (const line of Array.isArray(queueRows) ? queueRows : []) {
+    let row;
+    try { row = typeof line === "string" ? JSON.parse(line) : line; } catch { continue; }
+    if (row?.source !== "codex") continue;
+    const identity = codexResidualIdentity(row, project);
+    if (identity) legacy.set(identity, row);
+  }
+  for (const [key, bucket] of Object.entries(liveBuckets || {})) {
+    const row = codexBucketAsRow(bucket, key, project);
+    if (row.source !== "codex") continue;
+    const identity = codexResidualIdentity(row, project);
+    if (identity) legacy.set(identity, row);
+  }
+  for (const [key, bucket] of Object.entries(rebuiltBuckets || {})) {
+    const row = codexBucketAsRow(bucket, key, project);
+    if (!isCodexRootSource(row.source)) continue;
+    const identity = codexResidualIdentity(row, project);
+    if (!identity) continue;
+    const totals = rebuilt.get(identity) || {};
+    for (const field of CODEX_RESIDUAL_FIELDS) {
+      const value = field === "billable_total_tokens"
+        ? row[field] ?? row.total_tokens
+        : row[field];
+      totals[field] = (Number(totals[field]) || 0) + (Number(value) || 0);
+    }
+    rebuilt.set(identity, totals);
+  }
+
+  return Array.from(legacy.values()).map((row) => {
+    const identity = codexResidualIdentity(row, project);
+    const rebuiltTotals = rebuilt.get(identity) || {};
+    const residual = { ...row, source: "codex" };
+    for (const field of CODEX_RESIDUAL_FIELDS) {
+      const existing = Number(row[field] ?? (field === "billable_total_tokens" ? row.total_tokens : 0)) || 0;
+      residual[field] = Math.max(0, existing - (Number(rebuiltTotals[field]) || 0));
+    }
+    return JSON.stringify(residual);
+  });
+}
+
 // One-time repair (#187): rebuild codex hourly buckets that the inode-keyed
 // re-scan double-counted before the codexHashes event-dedup landed, and push
 // the corrected values to the cloud. Runs BEFORE the codex parse in the same
@@ -4910,6 +5007,8 @@ async function repairCodexRescanInflation({
   // shipped since the last run is applied to the rebuilt history.
   migrationKey = CODEX_RESCAN_DEDUP_REPAIR_KEY,
   uploadNote = "reset_after_codex_rescan_dedup_2026_06",
+  attributeCodexRoots = false,
+  preserveLegacyResidual = false,
 }) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
@@ -4924,12 +5023,13 @@ async function repairCodexRescanInflation({
   if (priorRepair && !(typeof priorRepair === "object" && priorRepair.skipped)) return false;
 
   // Codex session files THIS sync discovered (source === "codex").
-  const codexFiles = [];
+  const codexEntries = [];
   for (const entry of Array.isArray(rolloutFiles) ? rolloutFiles : []) {
     const fp = typeof entry === "string" ? entry : entry?.path;
     const src = typeof entry === "string" ? "codex" : String(entry?.source || "codex");
-    if (fp && src === "codex") codexFiles.push(fp);
+    if (fp && src === "codex") codexEntries.push(typeof entry === "string" ? { path: fp, source: "codex" } : entry);
   }
+  const codexFiles = codexEntries.map((entry) => entry.path);
   const codexFileSet = new Set(codexFiles);
   const projectRepairEnabled = typeof projectQueuePath === "string" && projectQueuePath.length > 0;
 
@@ -4950,7 +5050,7 @@ async function repairCodexRescanInflation({
     const id = codexSessionIdFromPath(fp);
     if (id) scannedSessionIds.add(id);
   }
-  if (cursors.files && typeof cursors.files === "object") {
+  if (!preserveLegacyResidual && cursors.files && typeof cursors.files === "object") {
     for (const fp of Object.keys(cursors.files)) {
       if (!isCodexSessionCursorPath(fp)) continue;
       if (codexFileSet.has(fp)) continue; // exact file re-scanned this run
@@ -4985,7 +5085,9 @@ async function repairCodexRescanInflation({
       codexHashes: [],
     };
     await parseRolloutIncremental({
-      rolloutFiles: codexFiles.map((p) => ({ path: p, source: "codex" })),
+      rolloutFiles: attributeCodexRoots
+        ? codexEntries
+        : codexFiles.map((p) => ({ path: p, source: "codex" })),
       cursors: tmpCursors,
       queuePath: tmpQueue,
       projectQueuePath: tmpProjectQueue,
@@ -5028,14 +5130,17 @@ async function repairCodexRescanInflation({
   // SANITY: codex files exist on disk but the rebuild produced no codex buckets
   // → treat as a failed rebuild and skip (do NOT clear live data, do NOT set the
   // key — retry next sync).
-  const rebuiltCodexKeys = Object.keys(rebuilt.buckets).filter((k) => k.startsWith("codex|"));
+  const rebuiltCodexKeys = Object.keys(rebuilt.buckets).filter((key) => {
+    const source = key.split("|")[0];
+    return attributeCodexRoots ? isCodexRootSource(source) : source === "codex";
+  });
   if (codexFiles.length > 0 && rebuiltCodexKeys.length === 0) {
     console.error(
       `[sync] codex rescan repair: rebuild produced 0 codex buckets from ${codexFiles.length} files — skipping to avoid data loss`,
     );
     return false;
   }
-  if (projectRepairEnabled) {
+  if (projectRepairEnabled && !preserveLegacyResidual) {
     const malformedProjectRows = await countMalformedCodexProjectQueueRows(projectQueuePath);
     if (malformedProjectRows > 0) {
       console.error(
@@ -5118,8 +5223,16 @@ async function repairCodexRescanInflation({
     } catch (e) {
       if (e?.code !== "ENOENT") throw e;
     }
+    const rawRows = raw.split("\n").filter((line) => line.trim());
+    const legacyResidualRows = preserveLegacyResidual
+      ? buildCodexLegacyResidualRows({
+          queueRows: rawRows,
+          liveBuckets: cursors.hourly?.buckets,
+          rebuiltBuckets: rebuilt.buckets,
+        })
+      : [];
     const kept = [];
-    for (const line of raw.split("\n")) {
+    for (const line of rawRows) {
       if (!line.trim()) continue;
       let row;
       try {
@@ -5133,7 +5246,12 @@ async function repairCodexRescanInflation({
     }
     await ensureDir(path.dirname(queuePath));
     const tmp = `${queuePath}.tmp.${process.pid}.${Date.now()}`;
-    await fs.writeFile(tmp, kept.concat(rebuilt.queueRows).join("\n") + "\n", "utf8");
+    const nextQueueRows = kept.concat(legacyResidualRows, rebuilt.queueRows);
+    await fs.writeFile(
+      tmp,
+      nextQueueRows.length ? `${nextQueueRows.join("\n")}\n` : "",
+      "utf8",
+    );
     await fs.rename(tmp, queuePath);
   }
 
@@ -5150,10 +5268,12 @@ async function repairCodexRescanInflation({
     if (k.startsWith("codex|")) delete hourly.groupQueued[k];
   }
   for (const [k, v] of Object.entries(rebuilt.buckets)) {
-    if (k.startsWith("codex|")) hourly.buckets[k] = v;
+    const source = k.split("|")[0];
+    if (attributeCodexRoots ? isCodexRootSource(source) : source === "codex") hourly.buckets[k] = v;
   }
   for (const [k, v] of Object.entries(rebuilt.groupQueued)) {
-    if (k.startsWith("codex|")) hourly.groupQueued[k] = v;
+    const source = k.split("|")[0];
+    if (attributeCodexRoots ? isCodexRootSource(source) : source === "codex") hourly.groupQueued[k] = v;
   }
   cursors.files ||= {};
   for (const fp of Object.keys(cursors.files)) {
@@ -5174,8 +5294,17 @@ async function repairCodexRescanInflation({
     } catch (e) {
       if (e?.code !== "ENOENT") throw e;
     }
+    const rawProjectRows = projectRaw.split("\n").filter((line) => line.trim());
+    const legacyProjectResidualRows = preserveLegacyResidual
+      ? buildCodexLegacyResidualRows({
+          queueRows: rawProjectRows,
+          liveBuckets: cursors.projectHourly?.buckets,
+          rebuiltBuckets: rebuilt.projectHourly?.buckets,
+          project: true,
+        })
+      : [];
     const keptProjectRows = [];
-    for (const line of projectRaw.split("\n")) {
+    for (const line of rawProjectRows) {
       if (!line.trim()) continue;
       let row;
       try {
@@ -5189,9 +5318,13 @@ async function repairCodexRescanInflation({
     }
     await ensureDir(path.dirname(projectQueuePath));
     const tmp = `${projectQueuePath}.tmp.${process.pid}.${Date.now()}`;
+    const nextProjectQueueRows = keptProjectRows.concat(
+      legacyProjectResidualRows,
+      rebuilt.projectQueueRows,
+    );
     await fs.writeFile(
       tmp,
-      keptProjectRows.concat(rebuilt.projectQueueRows).join("\n") + "\n",
+      nextProjectQueueRows.length ? `${nextProjectQueueRows.join("\n")}\n` : "",
       "utf8",
     );
     await fs.rename(tmp, projectQueuePath);
@@ -5207,7 +5340,9 @@ async function repairCodexRescanInflation({
     const rebuiltProjectHourly = rebuilt.projectHourly || {};
     for (const [key, bucket] of Object.entries(rebuiltProjectHourly.buckets || {})) {
       const source = typeof bucket?.source === "string" ? bucket.source : key.split("|")[1];
-      if (source === "codex") projectHourly.buckets[key] = bucket;
+      if (attributeCodexRoots ? isCodexRootSource(source) : source === "codex") {
+        projectHourly.buckets[key] = bucket;
+      }
     }
     for (const [key, meta] of Object.entries(rebuiltProjectHourly.projects || {})) {
       if (meta && typeof meta === "object") projectHourly.projects[key] = meta;

@@ -39,3 +39,12 @@ test("different buckets are not deduped against each other", () => {
   ]);
   assert.equal(w.totals.tokens, 350);
 });
+
+test("Codex root sources remain distinct buckets but fold into the Codex ranking", () => {
+  const w = aggregateWrapped([
+    row({ source: "codex-root:codex-12345678", model: "gpt-5.5", hour_start: "2026-04-01T10:00:00.000Z", total: 100 }),
+    row({ source: "codex-root:codex-ipc-87654321", model: "gpt-5.5", hour_start: "2026-04-01T10:00:00.000Z", total: 200 }),
+  ]);
+  assert.equal(w.totals.tokens, 300);
+  assert.deepEqual(w.top.sources, [{ source: "codex", tokens: 300, share: 1 }]);
+});

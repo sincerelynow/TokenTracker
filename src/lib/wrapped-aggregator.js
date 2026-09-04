@@ -1,5 +1,7 @@
 "use strict";
 
+const { canonicalUsageSource } = require("./codex-source");
+
 /**
  * Wrapped aggregator — turns a list of queue.jsonl rows into a year-end
  * summary suitable for the `tracker wrapped` CLI command and the
@@ -126,7 +128,10 @@ function aggregateWrapped(rows, opts = {}) {
     const t = rowTokens(row);
     totalTokens += t;
     if (isFiniteNumber(row.conversation_count)) totalConvs += row.conversation_count;
-    if (row.source) tokensBySource.set(row.source, (tokensBySource.get(row.source) || 0) + t);
+    if (row.source) {
+      const source = canonicalUsageSource(row.source);
+      tokensBySource.set(source, (tokensBySource.get(source) || 0) + t);
+    }
     if (row.model) tokensByModel.set(row.model, (tokensByModel.get(row.model) || 0) + t);
     const day = rowDay(row);
     if (day) tokensByDay.set(day, (tokensByDay.get(day) || 0) + t);

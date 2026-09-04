@@ -14,6 +14,27 @@ vi.mock("../../../../lib/timezone", () => ({
 }));
 
 describe("ContextBreakdownPanel", () => {
+  it("uses the root request source while retaining Codex display behavior", async () => {
+    getUsageCategoryBreakdown.mockResolvedValueOnce({
+      source: "codex",
+      scope: "supported",
+      totals: { total_tokens: 0 },
+      tool_calls_breakdown: { total_calls: 0, categories: [] },
+      exec_command_breakdown: { by_type: [], by_exit: [] },
+    });
+    render(
+      <ContextBreakdownPanel
+        from="2026-05-09"
+        to="2026-05-09"
+        source="codex"
+        requestSource="codex-root:codex-ipc-12345678"
+      />,
+    );
+    await waitFor(() => expect(getUsageCategoryBreakdown).toHaveBeenCalledWith(
+      expect.objectContaining({ source: "codex-root:codex-ipc-12345678" }),
+    ));
+  });
+
   it("uses generic loading copy while session logs are being scanned", async () => {
     getUsageCategoryBreakdown.mockReturnValueOnce(new Promise(() => {}));
 

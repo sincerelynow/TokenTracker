@@ -565,6 +565,17 @@ export default async function (req: Request): Promise<Response> {
     models: Map<string, ModelAgg>;
   }
 
+  const codexRootMetadata = (source: string) => {
+    if (!source.startsWith("codex-root:")) return null;
+    const key = source.slice("codex-root:".length);
+    const labelKey = key.replace(/-[0-9a-f]{8}$/i, "") || "codex";
+    return {
+      provider_family: "codex",
+      instance_key: key,
+      instance_label: labelKey.replace(/-/g, "_").toUpperCase(),
+    };
+  };
+
   const newTotals = (): Totals => ({
     total_tokens: 0,
     billable_total_tokens: 0,
@@ -610,7 +621,7 @@ export default async function (req: Request): Promise<Response> {
       src === "workbuddy" && mdl.toLowerCase() === "auto" ? "hy3-preview-agent" : mdl;
     const p = getRowPricing({ ...row, model: modelForPricing });
     const subscriptionBacked = src === "pi-github-copilot" || src === "pi-copilot";
-    const reasoningIncludedInOutput = src === "codex" || src === "every-code";
+    const reasoningIncludedInOutput = src === "codex" || src.startsWith("codex-root:") || src === "every-code";
     const reportedCost = Number(row.total_cost_usd);
     ma.totalCostUsd += subscriptionBacked
       ? 0
@@ -639,6 +650,7 @@ export default async function (req: Request): Promise<Response> {
     const sourceCost = models.reduce((sum, m) => sum + Number(m.totals.total_cost_usd), 0);
     return {
       source: s.source,
+      ...(s.source === "codex" ? { provider_family: "codex" } : codexRootMetadata(s.source) || {}),
       totals: { ...s.totals, total_cost_usd: sourceCost.toFixed(6) },
       models,
     };

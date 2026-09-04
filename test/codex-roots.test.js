@@ -9,6 +9,7 @@ const path = require("node:path");
 const {
   MAX_CODEX_ROOTS,
   normalizeConfiguredRoots,
+  normalizeRootRecords,
   resolveCodexRootsSync,
   saveCodexRoots,
 } = require("../src/lib/codex-roots");
@@ -49,7 +50,27 @@ test("saved roots override CODEX_HOME, expand tilde, dedupe, and preserve config
   const config = JSON.parse(await fs.readFile(fx.configPath, "utf8"));
   assert.equal(config.baseUrl, "https://example.test");
   assert.deepEqual(config.custom, { keep: true });
-  assert.deepEqual(config.codexHomes, [primary, secondary]);
+  assert.deepEqual(config.codexHomes.map((root) => root.path), [primary, secondary]);
+  assert.deepEqual(config.codexHomes.map((root) => root.label), ["CODEX", "CODEX_IPC"]);
+  assert.ok(config.codexHomes.every((root) => /^[a-z0-9-]+$/.test(root.key)));
+  assert.ok(config.codexHomes.every((root) => !root.key.includes(fx.home)));
+  const reloaded = resolveCodexRootsSync({ ...fx, env: {}, includeWsl: false });
+  assert.deepEqual(reloaded.roots.map((root) => root.key), config.codexHomes.map((root) => root.key));
+  assert.ok(reloaded.roots.every((root) => root.stats_source === `codex-root:${root.key}`));
+});
+
+test("normalizes duplicate supplied keys and labels into distinguishable stable records", async (t) => {
+  const fx = await fixture(t);
+  const first = path.join(fx.home, "one", ".codex");
+  const second = path.join(fx.home, "two", ".codex");
+  await fs.mkdir(first, { recursive: true });
+  await fs.mkdir(second, { recursive: true });
+  const records = normalizeRootRecords([
+    { path: first, key: "shared-key", label: "CODEX" },
+    { path: second, key: "shared-key", label: "CODEX" },
+  ], { home: fx.home });
+  assert.equal(new Set(records.map((root) => root.key)).size, 2);
+  assert.equal(new Set(records.map((root) => root.label)).size, 2);
 });
 
 test("deduplicates existing roots by real path", async (t) => {

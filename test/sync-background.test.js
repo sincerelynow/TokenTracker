@@ -178,7 +178,7 @@ test("background auto sync skips deep Codex archives", async () => {
 
     assert.equal(archiveReads, 0);
     const queue = await readQueue(home);
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[a-z0-9-]+"/);
     assert.match(queue, /"total_tokens":31/);
     assert.doesNotMatch(queue, /"total_tokens":47/);
   });
@@ -229,7 +229,7 @@ test("Codex notify sync catches up after an overlapping background sync releases
     await notificationSync;
 
     const queue = await readQueue(home);
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[a-z0-9-]+"/);
     assert.match(queue, /"total_tokens":73/);
   });
 });
@@ -260,7 +260,7 @@ test("native account publication waits for an overlapping sync instead of report
     await publicationSync;
 
     const queue = await readQueue(home);
-    assert.match(queue, /"source":"codex"/);
+    assert.match(queue, /"source":"codex-root:[a-z0-9-]+"/);
     assert.match(queue, /"total_tokens":79/);
   });
 });

@@ -124,11 +124,19 @@ test("probeWsl:false opts the real home out of WSL discovery", () => {
 });
 
 test("codex roots resolve independently of claude roots", () => {
+  let resolverOptions = null;
+  const expected = [path.join(REAL_HOME, ".codex"), "\\\\wsl$\\Ubuntu\\home\\dev\\.codex"];
   const deps = {
     platform: "win32",
     homedir: () => REAL_HOME,
     discoverWslHome: (providerDir) => `\\\\wsl$\\Ubuntu\\home\\dev\\${providerDir}`,
+    resolveCodexRootPaths: (options) => {
+      resolverOptions = options;
+      return expected;
+    },
   };
   const roots = providerRoots(REAL_HOME, ".codex", { TOKENTRACKER_WSL_MODE: "both" }, deps);
-  assert.deepEqual(roots, [path.join(REAL_HOME, ".codex"), "\\\\wsl$\\Ubuntu\\home\\dev\\.codex"]);
+  assert.deepEqual(roots, expected);
+  assert.equal(resolverOptions.platform, "win32");
+  assert.equal(resolverOptions.includeWsl, true);
 });

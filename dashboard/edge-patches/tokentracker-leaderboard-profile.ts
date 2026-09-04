@@ -422,7 +422,7 @@ function computeRowCost(row: UsageRow): number {
       ? "hy3-preview-agent"
       : row.model;
   const p = getRowPricing({ ...row, model: modelForPricing });
-  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningIncludedInOutput = row.source === "codex" || row.source.startsWith("codex-root:") || row.source === "every-code";
   const reasoningCost = reasoningIncludedInOutput
     ? 0
     : (row.reasoning_output_tokens || 0) * (p.output || 0);
@@ -443,6 +443,7 @@ const KNOWN_SOURCES = new Set([
   "pi-copilot", "kimi", "droid",
 ]);
 function canonicalSource(s: string) {
+  if (s.startsWith("codex-root:")) return "codex";
   return KNOWN_SOURCES.has(s) ? s : "other";
 }
 

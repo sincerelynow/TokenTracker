@@ -28,6 +28,7 @@ const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
 const { cmdSync } = require("../src/commands/sync");
+const { isCodexSource } = require("../src/lib/codex-source");
 const wsl = require("../src/lib/wsl-probe");
 const { mockPlatform, mockMethod } = require("./helpers/mock");
 
@@ -104,7 +105,7 @@ async function appendShared(codexHome, content) {
 async function readQueueTokens(queuePath) {
   const raw = await fs.readFile(queuePath, "utf8").catch((e) => (e.code === "ENOENT" ? "" : Promise.reject(e)));
   const records = raw.trim() ? raw.trim().split("\n").map((l) => JSON.parse(l)) : [];
-  const codex = records.filter((r) => r && r.source === "codex");
+  const codex = records.filter((r) => r && isCodexSource(r.source));
   // latest entry per (source, model, hour_start) wins
   const latest = new Map();
   for (const r of codex) latest.set(`${r.source}|${r.model}|${r.hour_start}`, r);

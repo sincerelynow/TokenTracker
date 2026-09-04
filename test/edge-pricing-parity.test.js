@@ -143,6 +143,26 @@ test("all cloud cost paths only prefer provider-reported costs for authoritative
   }
 });
 
+test("all cloud paths retain Codex root pricing and reasoning semantics", () => {
+  for (const name of [CANONICAL, ...MIRRORS]) {
+    const source = readEdge(name);
+    assert.ok(source.includes('startsWith("codex-root:")'), `${name}: Codex root family check missing`);
+    assert.match(
+      source,
+      /(?:row\.source|src|source)\s*===\s*"codex"[\s\S]{0,100}startsWith\("codex-root:"\)/,
+      `${name}: Codex root source must share Codex pricing or reasoning behavior`,
+    );
+  }
+  for (const name of [CANONICAL, "tokentracker-leaderboard-profile.ts"]) {
+    const source = readEdge(name);
+    assert.match(
+      source,
+      /(?:row\.source|s)\.startsWith\("codex-root:"\)[\s\S]{0,80}"codex"/,
+      `${name}: public leaderboard must fold Codex roots into codex`,
+    );
+  }
+});
+
 test("all cloud cost paths retain DeepSeek V4 peak/off-peak pricing tiers", () => {
   for (const name of [CANONICAL, ...MIRRORS]) {
     const source = readEdge(name);

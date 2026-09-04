@@ -590,9 +590,11 @@
   "settings.codex_roots.duplicate": "Dieses Verzeichnis ist bereits aufgeführt.",
   "settings.codex_roots.detected": "Sitzungen erkannt",
   "settings.codex_roots.not_detected": "Noch keine Sitzungen erkannt",
+  "settings.codex_roots.stats_label": "Nutzungskarte: {{label}}",
   "settings.codex_roots.wsl_detected": "Zusätzlich wurde das WSL-Verzeichnis {{path}} erkannt.",
   "settings.codex_roots.save": "Verzeichnisse speichern",
   "settings.codex_roots.saving": "Wird gespeichert...",
   "settings.codex_roots.saved": "Codex-Scanverzeichnisse gespeichert.",
-  "settings.codex_roots.error": "Codex-Verzeichnisse konnten nicht gespeichert werden: {{error}}"
+  "settings.codex_roots.error": "Codex-Verzeichnisse konnten nicht gespeichert werden: {{error}}",
+  "usage.overview.codex_all": "CODEX ALL"
 }

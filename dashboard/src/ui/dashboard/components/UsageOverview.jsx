@@ -89,6 +89,7 @@ const PROVIDER_COLORS = {
 
 function getProviderColor(label, index) {
   const normalized = label?.toUpperCase?.() || "";
+  if (normalized.startsWith("CODEX")) return PROVIDER_COLORS.CODEX;
   return PROVIDER_COLORS[normalized] || `hsl(${150 + index * 40}, 60%, 45%)`;
 }
 
@@ -96,7 +97,7 @@ function resolveContextBreakdownSource(provider) {
   const source = String(provider?.source || "").trim().toLowerCase();
   const label = String(provider?.label || "").trim().toLowerCase();
   if (source === "claude" || label === "claude") return "claude";
-  if (source === "codex" || label === "codex") return "codex";
+  if (source === "codex" || source === "codex-all" || source.startsWith("codex-root:") || label === "codex") return "codex";
   if (source === "grok" || label === "grok" || label.includes("grok")) return "grok";
   return null;
 }
@@ -315,10 +316,17 @@ export function UsageOverview({
   );
 
   // FleetData is already grouped by provider.
-  const providers = fleetData.filter((f) => f.models?.length > 0);
+  const providers = fleetData.filter((f) => f.models?.length > 0 && !f.isHiddenProvider);
+  const meteredProviders = fleetData.filter((provider) => !provider.isSyntheticAggregate);
+  const hasCodexAggregate = providers.some((provider) => provider.isSyntheticAggregate);
+  const distributionProviders = providers.filter((provider) => {
+    if (!hasCodexAggregate) return !provider.isSyntheticAggregate;
+    const source = String(provider.source || "").toLowerCase();
+    return provider.isSyntheticAggregate || !source.startsWith("codex-root:");
+  });
   const allModels = useMemo(() => buildAllModels(fleetData), [fleetData]);
   const allUsage = allModels.reduce((sum, model) => sum + (Number(model.usage) || 0), 0);
-  const allCost = providers.reduce((sum, provider) => sum + (Number(provider.usd) || 0), 0);
+  const allCost = meteredProviders.reduce((sum, provider) => sum + (Number(provider.usd) || 0), 0);
   const activeProvider =
     expandedProvider == null
       ? null
@@ -486,7 +494,7 @@ export function UsageOverview({
             <div
               role="img"
               aria-label={copy("usage.overview.distribution_aria", {
-                items: providers
+                items: distributionProviders
                   .map((provider) =>
                     copy("usage.overview.distribution_item", {
                       label: formatProviderDisplayName(provider.label),
@@ -497,7 +505,7 @@ export function UsageOverview({
               })}
               className="h-1.5 w-full bg-oai-gray-100 dark:bg-oai-gray-800 rounded-full overflow-hidden flex"
             >
-              {providers.map((provider, idx) => {
+              {distributionProviders.map((provider, idx) => {
                 const color = getProviderColor(provider.label, idx);
                 const displayLabel = formatProviderDisplayName(provider.label);
                 const percentLabel = formatProviderPercent(provider);
@@ -632,6 +640,7 @@ export function UsageOverview({
                         color={color}
                         providerHeading={providerHeading}
                         contextSource={contextSource}
+                        contextRequestSource={provider.isSyntheticAggregate ? "codex" : provider.source}
                         from={from}
                         to={to}
                         sortedModels={sortedModels}
@@ -723,7 +732,7 @@ function AllModelsSection({ models }) {
   );
 }
 
-function ProviderExpandedSection({ provider, color, providerHeading, contextSource, from, to, sortedModels }) {
+function ProviderExpandedSection({ provider, color, providerHeading, contextSource, contextRequestSource, from, to, sortedModels }) {
   const { formatTokens } = useTokenFormat();
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const isAntigravity =
@@ -786,6 +795,7 @@ function ProviderExpandedSection({ provider, color, providerHeading, contextSour
                               from={from}
                               to={to}
                               source={contextSource}
+                              requestSource={contextRequestSource}
                               referenceTotalTokens={provider.usage}
                               onLoadingChange={setBreakdownLoading}
                             />

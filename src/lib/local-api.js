@@ -12,6 +12,11 @@ const {
 } = require("./source-metadata");
 const { accountSlugFor, fetchAccountUsage, mintAccessToken } = require("./cloud-account");
 const { getOrCreateMachineId, computeStableMachineId } = require("./machine-id");
+const {
+  codexRootKeyFromSource,
+  codexRootLabelFromKey,
+  isCodexSource,
+} = require("./codex-source");
 
 const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
@@ -188,7 +193,7 @@ function readProjectQueueData(projectQueuePath) {
 }
 
 function isLegacyInclusiveCodexRow(row) {
-  if (!row || (row.source !== "codex" && row.source !== "every-code")) return false;
+  if (!row || (!isCodexSource(row.source) && row.source !== "every-code")) return false;
   const inputTokens = Number(row.input_tokens || 0);
   const cachedInputTokens = Number(row.cached_input_tokens || 0);
   const outputTokens = Number(row.output_tokens || 0);
@@ -444,7 +449,7 @@ function buildCodexCategoryFallbackFromQueue(queueRows, { from, to, timeZoneCont
   let conversationCount = 0;
 
   for (const row of queueRows || []) {
-    if ((row?.source || "") !== "codex") continue;
+    if (!isCodexSource(row?.source)) continue;
     if (!row.hour_start) continue;
     const day = rowDayKey(row, timeZoneContext);
     if (from && day < from) continue;
@@ -2351,12 +2356,35 @@ function createLocalApiHandler({ queuePath }) {
         return d >= from && d <= to;
       });
 
+      let codexRootLabels = new Map();
+      try {
+        const rootState = require("./codex-roots").resolveCodexRootsSync({
+          home: os.homedir(),
+          trackerDir: path.dirname(qp),
+          env: process.env,
+        });
+        codexRootLabels = new Map(rootState.roots.map((root) => [root.key, root.label]));
+      } catch {
+        codexRootLabels = new Map();
+      }
       const bySource = new Map();
       for (const row of rows) {
         const src = row.source || "unknown";
         const mdl = row.model || "unknown";
-        if (!bySource.has(src))
-          bySource.set(src, { source: src, source_scope: getSourceScope(src), totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" }, models: new Map() });
+        if (!bySource.has(src)) {
+          const instanceKey = codexRootKeyFromSource(src);
+          bySource.set(src, {
+            source: src,
+            source_scope: getSourceScope(src),
+            ...(isCodexSource(src) ? { provider_family: "codex" } : {}),
+            ...(instanceKey ? {
+              instance_key: instanceKey,
+              instance_label: codexRootLabels.get(instanceKey) || codexRootLabelFromKey(instanceKey),
+            } : {}),
+            totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" },
+            models: new Map(),
+          });
+        }
         const sa = bySource.get(src);
         sa.totals.total_tokens += row.total_tokens || 0;
         sa.totals.billable_total_tokens += row.billable_total_tokens ?? row.total_tokens ?? 0;
@@ -2422,17 +2450,23 @@ function createLocalApiHandler({ queuePath }) {
         return true;
       }
 
-      if (requestedSource === "codex") {
+      if (isCodexSource(requestedSource)) {
         try {
           const timeZoneContext = getTimeZoneContext(url);
+          const sourceInstance = codexRootKeyFromSource(requestedSource);
           const result = await computeCodexContextBreakdown({
             from,
             to,
             top: 50,
             timeZoneContext,
+            sourceInstance,
           });
           if (!Number(result?.totals?.total_tokens || 0)) {
-            const fallback = buildCodexCategoryFallbackFromQueue(readQueueData(qp), {
+            const fallbackRows = readQueueData(qp).filter((row) => {
+              if (!sourceInstance) return isCodexSource(row?.source);
+              return codexRootKeyFromSource(row?.source) === sourceInstance;
+            });
+            const fallback = buildCodexCategoryFallbackFromQueue(fallbackRows, {
               from,
               to,
               timeZoneContext,

@@ -522,7 +522,7 @@ function computeRowCost(row: GroupedRow): number {
   // Must stay in lockstep with src/lib/pricing/index.js:computeRowCost and
   // tokentracker-leaderboard-refresh.ts (both guard on source).
   const reasoningCost =
-    row.source === "codex" || row.source === "every-code"
+    row.source === "codex" || row.source.startsWith("codex-root:") || row.source === "every-code"
       ? 0
       : (Number(row.reasoning_output_tokens) || 0) * (p.output || 0);
   return (

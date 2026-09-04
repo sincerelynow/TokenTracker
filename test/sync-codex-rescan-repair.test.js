@@ -8,6 +8,7 @@ const {
   cmdSync,
   repairCodexRescanInflation,
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
+  CODEX_ROOT_ATTRIBUTION_REPAIR_KEY,
 } = require("../src/commands/sync");
 
 async function makeTempHome() {
@@ -247,6 +248,79 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
         false,
       );
       assert.equal(codexBucketTotal(cursors), TRUE_CODEX_TOTAL);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("attributes recoverable history to a root, preserves the legacy residual once, and is idempotent", async () => {
+    const home = await makeTempHome();
+    try {
+      const codexFile = await writeCodexFile(home);
+      const queuePath = path.join(home, "queue.jsonl");
+      const queueStatePath = path.join(home, "queue.state.json");
+      const hour = "2025-12-17T00:00:00.000Z";
+      const legacy = {
+        source: "codex",
+        model: "unknown",
+        hour_start: hour,
+        input_tokens: 240,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        output_tokens: 160,
+        reasoning_output_tokens: 0,
+        total_tokens: 400,
+        billable_total_tokens: 400,
+        conversation_count: 2,
+      };
+      await fs.writeFile(queuePath, `${JSON.stringify(legacy)}\n`, "utf8");
+      await fs.writeFile(queueStatePath, JSON.stringify({ offset: 999 }), "utf8");
+      const cursors = {
+        hourly: {
+          buckets: {
+            [`codex|unknown|${hour}`]: {
+              source: "codex",
+              model: "unknown",
+              hour_start: hour,
+              totals: { ...legacy },
+            },
+          },
+          groupQueued: {},
+        },
+        files: { [codexFile]: { inode: 1, offset: 5, lastTotal: T2 } },
+        codexHashes: ["stale:key"],
+        migrations: {},
+      };
+      const args = {
+        cursors,
+        queuePath,
+        queueStatePath,
+        rolloutFiles: [{
+          path: codexFile,
+          source: "codex",
+          statsSource: "codex-root:codex-12345678",
+        }],
+        migrationKey: CODEX_ROOT_ATTRIBUTION_REPAIR_KEY,
+        uploadNote: "root-attribution-test",
+        attributeCodexRoots: true,
+        preserveLegacyResidual: true,
+      };
+
+      assert.equal(await repairCodexRescanInflation(args), true);
+      const rows = await queueRowsBySource(queuePath);
+      assert.equal(rows["codex-root:codex-12345678"].total, TRUE_CODEX_TOTAL);
+      assert.equal(rows.codex.total, 150);
+      assert.equal(
+        cursors.hourly.buckets[`codex-root:codex-12345678|unknown|${hour}`].totals.total_tokens,
+        TRUE_CODEX_TOTAL,
+      );
+      assert.equal(cursors.hourly.buckets[`codex|unknown|${hour}`], undefined);
+      assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).note, "root-attribution-test");
+      assert.equal(typeof cursors.migrations[CODEX_ROOT_ATTRIBUTION_REPAIR_KEY], "string");
+
+      const queueAfterFirstRun = await fs.readFile(queuePath, "utf8");
+      assert.equal(await repairCodexRescanInflation(args), false);
+      assert.equal(await fs.readFile(queuePath, "utf8"), queueAfterFirstRun);
     } finally {
       await fs.rm(home, { recursive: true, force: true });
     }

@@ -27,12 +27,14 @@ describe("useCodexRoots", () => {
   });
 
   it("loads and replaces state after a save", async () => {
-    api.get.mockResolvedValue({ roots: [{ path: "/a" }], configured: false, source: "default", max_roots: 16 });
-    api.update.mockResolvedValue({ roots: [{ path: "/a" }, { path: "/b" }], configured: true, source: "configured", max_roots: 16 });
+    const first = { path: "/a", key: "a-12345678", label: "A" };
+    const second = { path: "/b", key: "b-87654321", label: "B" };
+    api.get.mockResolvedValue({ roots: [first], configured: false, source: "default", max_roots: 16 });
+    api.update.mockResolvedValue({ roots: [first, second], configured: true, source: "configured", max_roots: 16 });
     const { result } = renderHook(() => useCodexRoots());
     await waitFor(() => expect(result.current.available).toBe(true));
-    await act(() => result.current.save(["/a", "/b"]));
-    expect(api.update).toHaveBeenCalledWith(["/a", "/b"]);
+    await act(() => result.current.save([first, second]));
+    expect(api.update).toHaveBeenCalledWith([first, second]);
     expect(result.current.roots).toHaveLength(2);
     expect(result.current.configured).toBe(true);
     expect(result.current.saving).toBe(false);

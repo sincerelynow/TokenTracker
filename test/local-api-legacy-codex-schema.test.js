@@ -113,6 +113,65 @@ test("usage-model-breakdown applies the same legacy Codex normalization before p
   }
 });
 
+test("usage-model-breakdown keeps Codex roots separate and exposes private instance metadata", async () => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-codex-roots-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const privatePath = path.join(tmp, "private-codex-root");
+    await fs.promises.mkdir(privatePath, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(tmp, "config.json"),
+      `${JSON.stringify({ codexHomes: [{ path: privatePath, key: "codex-private-12345678", label: "CODEX_PRIVATE" }] })}\n`,
+    );
+    await writeQueue(queuePath, [
+      {
+        source: "codex-root:codex-private-12345678",
+        model: "gpt-5.5",
+        hour_start: "2026-04-20T10:00:00.000Z",
+        input_tokens: 100,
+        output_tokens: 20,
+        total_tokens: 120,
+      },
+      {
+        source: "codex-root:codex-ipc-87654321",
+        model: "gpt-5.5",
+        hour_start: "2026-04-20T10:00:00.000Z",
+        input_tokens: 200,
+        output_tokens: 40,
+        total_tokens: 240,
+      },
+    ]);
+
+    const body = await callEndpoint(
+      queuePath,
+      "/functions/tokentracker-usage-model-breakdown?from=2026-04-20&to=2026-04-20&tz=UTC",
+    );
+
+    assert.equal(body.sources.length, 2);
+    const configured = body.sources.find((entry) => entry.instance_key === "codex-private-12345678");
+    assert.deepEqual(
+      {
+        source: configured?.source,
+        family: configured?.provider_family,
+        key: configured?.instance_key,
+        label: configured?.instance_label,
+        tokens: configured?.totals?.total_tokens,
+      },
+      {
+        source: "codex-root:codex-private-12345678",
+        family: "codex",
+        key: "codex-private-12345678",
+        label: "CODEX_PRIVATE",
+        tokens: 120,
+      },
+    );
+    const payload = JSON.stringify(body);
+    assert.equal(payload.includes(privatePath), false, "private breakdown must not expose the root path");
+  } finally {
+    await fs.promises.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("usage-model-breakdown prices Grok rows produced by the parser", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-grok-breakdown-"));
   try {

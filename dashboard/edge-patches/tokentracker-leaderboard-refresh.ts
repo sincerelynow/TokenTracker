@@ -440,7 +440,7 @@ function computeRowCost(row: HourlyRow): number {
   // would double-charge the reasoning slice. Kept explicit for other sources
   // where reasoning is NOT guaranteed to be folded into output_tokens.
   // Must stay in lockstep with local-api.js:computeRowCost.
-  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningIncludedInOutput = row.source === "codex" || row.source.startsWith("codex-root:") || row.source === "every-code";
   const reasoningCost = reasoningIncludedInOutput
     ? 0
     : (row.reasoning_output_tokens || 0) * (p.output || 0);
@@ -943,7 +943,8 @@ export default async function (req: Request): Promise<Response> {
         aggMap.set(row.user_id, agg);
       }
       const tokens = Number(row.total_tokens) || 0;
-      const col = SOURCE_COLUMN_MAP[row.source] ?? "other_tokens";
+      const canonicalSource = row.source.startsWith("codex-root:") ? "codex" : row.source;
+      const col = SOURCE_COLUMN_MAP[canonicalSource] ?? "other_tokens";
       (agg as unknown as Record<string, number>)[col] += tokens;
       agg.total_tokens += tokens;
       agg.estimated_cost_usd += computeRowCost(row);

@@ -293,6 +293,72 @@ describe("UsageOverview", () => {
     });
   });
 
+  it("drills a Codex root into that instance and CODEX ALL into all roots", async () => {
+    breakdownProps.length = 0;
+    const user = userEvent.setup();
+    const fleetData = [
+      {
+        source: "codex-all",
+        label: "CODEX ALL",
+        totalPercent: "100.00",
+        usage: 300,
+        usd: 3,
+        isSyntheticAggregate: true,
+        models: [{ id: "gpt-5.6", name: "gpt-5.6", share: 100, usage: 300, cost: 3 }],
+      },
+      {
+        source: "codex-root:codex-ipc-87654321",
+        label: "CODEX_IPC",
+        totalPercent: "66.67",
+        usage: 200,
+        usd: 2,
+        models: [{ id: "gpt-5.6", name: "gpt-5.6", share: 100, usage: 200, cost: 2 }],
+      },
+      {
+        source: "codex-root:codex-12345678",
+        label: "CODEX",
+        totalPercent: "33.33",
+        usage: 100,
+        usd: 1,
+        models: [{ id: "gpt-5.5", name: "gpt-5.5", share: 100, usage: 100, cost: 1 }],
+      },
+    ];
+
+    render(
+      <UsageOverview
+        period="month"
+        periods={[]}
+        summaryLabel="Total"
+        summaryValue="300"
+        fleetData={fleetData}
+        from="2026-05-01"
+        to="2026-05-31"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /CODEX ALL:/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /CODEX_IPC:/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^CODEX:/i })).toBeVisible();
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /CODEX_IPC:/i }));
+    });
+    expect(breakdownProps.at(-1)).toMatchObject({
+      source: "codex",
+      requestSource: "codex-root:codex-ipc-87654321",
+      referenceTotalTokens: 200,
+    });
+
+    await act(async () => {
+      await user.click(screen.getByRole("button", { name: /CODEX ALL:/i }));
+    });
+    expect(breakdownProps.at(-1)).toMatchObject({
+      source: "codex",
+      requestSource: "codex",
+      referenceTotalTokens: 300,
+    });
+  });
+
   it("keeps large model tokens, cost, and share in independent responsive columns", async () => {
     const user = userEvent.setup();
 

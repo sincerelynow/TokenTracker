@@ -252,6 +252,40 @@ test("mixed queue: buckets and states both count toward the batch cap; nextOffse
   assert.equal(second.sessionStates[0].session_id, "s-50");
 });
 
+test("Codex root buckets keep independent upload keys without exposing local paths", async (t) => {
+  const { dir, queuePath } = tempQueue("tokentracker-codex-root-upload-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const privateRoot = path.join(dir, ".codex-private");
+  writeQueue(queuePath, [
+    {
+      source: "codex-root:codex-12345678",
+      model: "gpt-5.5",
+      hour_start: "2027-01-10T10:00:00.000Z",
+      input_tokens: 10,
+      output_tokens: 2,
+      total_tokens: 12,
+    },
+    {
+      source: "codex-root:codex-ipc-87654321",
+      model: "gpt-5.5",
+      hour_start: "2027-01-10T10:00:00.000Z",
+      input_tokens: 20,
+      output_tokens: 4,
+      total_tokens: 24,
+    },
+  ]);
+
+  const batch = await readQueueBatch(queuePath, 0, BATCH_SIZE);
+  assert.deepEqual(
+    batch.buckets.map((row) => [row.source, row.total_tokens]).sort(),
+    [
+      ["codex-root:codex-12345678", 12],
+      ["codex-root:codex-ipc-87654321", 24],
+    ],
+  );
+  assert.equal(JSON.stringify(batch).includes(privateRoot), false);
+});
+
 test("duplicate observations of one session: last-wins within a batch, never duplicated inside one request", async (t) => {
   const { dir, queuePath, queueStatePath } = tempQueue("tokentracker-dup-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

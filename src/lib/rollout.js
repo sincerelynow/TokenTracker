@@ -16,6 +16,7 @@ const {
   snapshotUsageBaselines,
 } = require("./codex-token-usage");
 const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
+const { isCodexSource } = require("./codex-source");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -409,6 +410,9 @@ async function parseRolloutIncremental({
       typeof entry === "string"
         ? defaultSource
         : normalizeSourceInput(entry?.source) || defaultSource;
+    const fileStatsSource = typeof entry === "string"
+      ? fileSource
+      : normalizeSourceInput(entry?.statsSource) || fileSource;
     if (syncDiagnostics && fileSource === DEFAULT_SOURCE) syncDiagnostics.stat_candidates += 1;
     const st = rolloutStats[idx];
     if (!st || !st.isFile()) continue;
@@ -523,6 +527,7 @@ async function parseRolloutIncremental({
           hourlyState,
           touchedBuckets,
           source: fileSource,
+          statsSource: fileStatsSource,
           projectState,
           projectTouchedBuckets,
           projectRef,
@@ -2020,6 +2025,7 @@ async function parseRolloutFile({
   hourlyState,
   touchedBuckets,
   source,
+  statsSource,
   projectState,
   projectTouchedBuckets,
   projectRef,
@@ -2032,6 +2038,7 @@ async function parseRolloutFile({
   sessionId,
   invalidRecordPolicy,
 }) {
+  const bucketSource = normalizeSourceInput(statsSource) || source;
   const st = fileStat || (await fs.stat(filePath));
   const endOffset = st.size;
   const projectFileContexts = [];
@@ -2244,19 +2251,19 @@ async function parseRolloutFile({
       codexEvents.add(dedupKey);
     }
 
-    const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
+    const bucket = getHourlyBucket(hourlyState, bucketSource, model, bucketStart);
     addTotals(bucket.totals, delta);
-    touchedBuckets.add(bucketKey(source, model, bucketStart));
+    touchedBuckets.add(bucketKey(bucketSource, model, bucketStart));
     if (currentProjectKey && projectState && projectTouchedBuckets) {
       const projectBucket = getProjectBucket(
         projectState,
         currentProjectKey,
-        source,
+        bucketSource,
         bucketStart,
         currentProjectRef,
       );
       addTotals(projectBucket.totals, delta);
-      projectTouchedBuckets.add(projectBucketKey(currentProjectKey, source, bucketStart));
+      projectTouchedBuckets.add(projectBucketKey(currentProjectKey, bucketSource, bucketStart));
     }
     eventsAggregated += 1;
   }
@@ -2793,7 +2800,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
     if (Object.prototype.hasOwnProperty.call(groupQueued, groupKey)) {
       legacyGroups.add(groupKey);
     }
-    if (!codexTouched && groupKey.startsWith(`${DEFAULT_SOURCE}${BUCKET_SEPARATOR}`)) {
+    if (!codexTouched && isCodexSource(parseBucketKey(groupKey).source)) {
       codexTouched = true;
     }
   }

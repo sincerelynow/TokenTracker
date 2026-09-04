@@ -2,6 +2,39 @@ import { describe, expect, it } from "vitest";
 import { buildAllModels, buildFleetData } from "./model-breakdown";
 
 describe("buildFleetData", () => {
+  it("builds independent Codex root cards plus one non-metered aggregate", () => {
+    const fleet = buildFleetData({
+      sources: [
+        {
+          source: "codex-root:codex-12345678",
+          instance_label: "CODEX",
+          totals: { billable_total_tokens: 100, total_cost_usd: "1" },
+          models: [{ model_id: "gpt-5.5", totals: { billable_total_tokens: 100, total_cost_usd: "1" } }],
+        },
+        {
+          source: "codex-root:codex-ipc-87654321",
+          instance_label: "CODEX_IPC",
+          totals: { billable_total_tokens: 200, total_cost_usd: "2" },
+          models: [{ model_id: "gpt-5.6", totals: { billable_total_tokens: 200, total_cost_usd: "2" } }],
+        },
+      ],
+    }, { copyFn: (key: string) => key === "usage.overview.codex_all" ? "CODEX ALL" : key });
+
+    expect(fleet.map((entry: any) => entry.label)).toEqual(["CODEX ALL", "CODEX_IPC", "CODEX"]);
+    expect(fleet[0]).toMatchObject({ usage: 300, usd: 3, isSyntheticAggregate: true });
+    expect(buildAllModels(fleet).reduce((sum, model) => sum + model.usage, 0)).toBe(300);
+  });
+
+  it("does not add a redundant aggregate for one Codex root", () => {
+    const fleet = buildFleetData({ sources: [{
+      source: "codex-root:codex-12345678",
+      totals: { billable_total_tokens: 100 },
+      models: [{ model_id: "gpt-5.5", totals: { billable_total_tokens: 100 } }],
+    }] });
+    expect(fleet).toHaveLength(1);
+    expect(fleet[0].label).toBe("CODEX");
+  });
+
   it("keeps two decimal places for small provider percentages", () => {
     const fleet = buildFleetData({
       sources: [

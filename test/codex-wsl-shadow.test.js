@@ -5,6 +5,7 @@ const fs = require("node:fs/promises");
 const { test } = require("node:test");
 
 const { cmdSync } = require("../src/commands/sync");
+const { isCodexSource } = require("../src/lib/codex-source");
 const wsl = require("../src/lib/wsl-probe");
 const { mockPlatform, mockMethod } = require("./helpers/mock");
 
@@ -147,7 +148,7 @@ async function readQueue(queuePath) {
     throw err;
   });
   const records = raw.trim() ? raw.trim().split("\n").map((l) => JSON.parse(l)) : [];
-  const codex = records.filter((r) => r && r.source === "codex");
+  const codex = records.filter((r) => r && isCodexSource(r.source));
   return {
     raw,
     codexCount: codex.length,

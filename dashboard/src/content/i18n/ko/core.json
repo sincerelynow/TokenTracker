@@ -593,9 +593,11 @@
   "settings.codex_roots.duplicate": "이미 목록에 있는 루트입니다.",
   "settings.codex_roots.detected": "세션 감지됨",
   "settings.codex_roots.not_detected": "아직 세션이 감지되지 않음",
+  "settings.codex_roots.stats_label": "사용량 카드: {{label}}",
   "settings.codex_roots.wsl_detected": "WSL 세션 루트 {{path}}도 감지되었습니다.",
   "settings.codex_roots.save": "루트 저장",
   "settings.codex_roots.saving": "저장 중...",
   "settings.codex_roots.saved": "Codex 스캔 루트를 저장했습니다.",
-  "settings.codex_roots.error": "Codex 루트를 저장할 수 없습니다: {{error}}"
+  "settings.codex_roots.error": "Codex 루트를 저장할 수 없습니다: {{error}}",
+  "usage.overview.codex_all": "CODEX ALL"
 }

@@ -15,6 +15,11 @@ describe("formatProviderDisplayName", () => {
     expect(formatProviderDisplayName("")).toBe("");
   });
 
+  it("formats Codex root and aggregate sources", () => {
+    expect(formatProviderDisplayName("codex-root:codex-ipc-12345678")).toBe("CODEX_IPC");
+    expect(formatProviderDisplayName("codex-all")).toBe("CODEX ALL");
+  });
+
   it("gives Pi routed providers distinct readable names", () => {
     expect(formatProviderDisplayName("pi-anthropic")).toBe("Pi · Anthropic");
     expect(formatProviderDisplayName("PI-GITHUB-COPILOT")).toBe("Pi · GitHub Copilot");

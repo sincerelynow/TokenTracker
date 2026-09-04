@@ -6,6 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
+const { canonicalUsageSource, isCodexSource } = require("../codex-source");
 
 const curatedOverrides = require("./curated-overrides.json");
 const {
@@ -154,7 +155,7 @@ function isDeepSeekOffPeak(row) {
 }
 
 function getRowPricing(row) {
-  const pricing = getModelPricing(row?.model, { source: row?.source });
+  const pricing = getModelPricing(row?.model, { source: canonicalUsageSource(row?.source) });
   if (!isDeepSeekTimePricedModel(row?.model) || !isDeepSeekOffPeak(row)) return pricing;
   return {
     ...pricing,
@@ -183,7 +184,7 @@ function computeRowCost(row) {
     reportedCost > 0
   ) return reportedCost;
   const pricing = getRowPricing(row);
-  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningIncludedInOutput = isCodexSource(row.source) || row.source === "every-code";
   const reasoningCost = reasoningIncludedInOutput
     ? 0
     : (row.reasoning_output_tokens || 0) * (pricing.output || 0);

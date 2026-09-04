@@ -72,6 +72,26 @@ function canonicalSource(source: any): string {
   return SOURCE_ALIASES[raw] || raw;
 }
 
+const CODEX_ROOT_PREFIX = "codex-root:";
+
+function isCodexFleetSource(source: any) {
+  const normalized = String(source || "").trim().toLowerCase();
+  return normalized === "codex" || normalized.startsWith(CODEX_ROOT_PREFIX);
+}
+
+function codexRootLabel(source: any) {
+  const normalized = String(source || "").trim().toLowerCase();
+  if (normalized === "codex") return "CODEX";
+  const key = normalized.slice(CODEX_ROOT_PREFIX.length).replace(/-[0-9a-f]{8}$/, "");
+  return (key || "codex").replace(/-/g, "_").toUpperCase();
+}
+
+function codexRootSuffix(source: any) {
+  const key = String(source || "").trim().toLowerCase().slice(CODEX_ROOT_PREFIX.length);
+  const match = key.match(/-([0-9a-f]{8})$/);
+  return match ? match[1].toUpperCase() : key.slice(-8).toUpperCase();
+}
+
 const TOKEN_TOTAL_KEYS = [
   "total_tokens",
   "billable_total_tokens",
@@ -114,7 +134,15 @@ function mergeSourcesByAlias(sources: any[]) {
     if (!source) continue;
     let merged = bySource.get(source);
     if (!merged) {
-      merged = { source, source_scope: entry?.source_scope, totals: emptyTotals(), models: new Map() };
+      merged = {
+        source,
+        source_scope: entry?.source_scope,
+        provider_family: entry?.provider_family,
+        instance_key: entry?.instance_key,
+        instance_label: entry?.instance_label,
+        totals: emptyTotals(),
+        models: new Map(),
+      };
       bySource.set(source, merged);
     }
     addTotalsInto(merged.totals, entry?.totals);
@@ -146,6 +174,7 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
       const totalCost = toFiniteNumber(entry?.totals?.total_cost_usd) ?? 0;
       return {
         source: entry?.source,
+        instanceLabel: entry?.instance_label,
         totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
         totalCost: Number.isFinite(totalCost) ? totalCost : 0,
         inputTokens: Math.max(0, toFiniteNumber(entry?.totals?.input_tokens) ?? 0),
@@ -164,12 +193,14 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
       ? modelBreakdown.pricing.pricing_mode.toUpperCase()
       : null;
 
-  return normalizedSources
+  const cards: any[] = normalizedSources
     .slice()
     .sort((a: any, b: any) => b.totalTokens - a.totalTokens)
     .map((entry: any) => {
-      const label = entry.source
-        ? String(entry.source).toUpperCase()
+      const label = isCodexFleetSource(entry.source)
+        ? (entry.instanceLabel || codexRootLabel(entry.source))
+        : entry.source
+          ? String(entry.source).toUpperCase()
         : safeCopy("shared.placeholder.short");
       const totalPercentRaw = grandTotal > 0 ? (entry.totalTokens / grandTotal) * 100 : 0;
       const totalPercent = Number.isFinite(totalPercentRaw) ? totalPercentRaw.toFixed(2) : "0.00";
@@ -215,6 +246,55 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
         models,
       };
     });
+
+  const codexCards = cards.filter((entry: any) => isCodexFleetSource(entry.source));
+  const rootCards = codexCards.filter((entry: any) => String(entry.source).startsWith(CODEX_ROOT_PREFIX));
+  const labelCounts = new Map<string, number>();
+  for (const card of rootCards) labelCounts.set(card.label, (labelCounts.get(card.label) || 0) + 1);
+  for (const card of rootCards) {
+    if ((labelCounts.get(card.label) || 0) > 1) card.label = `${card.label}_${codexRootSuffix(card.source)}`;
+  }
+  const legacyCard = codexCards.find((entry: any) => entry.source === "codex");
+  if (legacyCard && rootCards.length > 0) legacyCard.isHiddenProvider = true;
+  const shouldAggregate = rootCards.length >= 2 || (rootCards.length > 0 && Boolean(legacyCard));
+  if (!shouldAggregate) return cards;
+
+  const aggregateModels = new Map<string, any>();
+  for (const card of codexCards) {
+    for (const model of card.models) {
+      const key = String(model.id || model.name).toLowerCase();
+      const current = aggregateModels.get(key) || { ...model, usage: 0, cost: 0 };
+      current.usage += Number(model.usage) || 0;
+      current.cost += Number(model.cost) || 0;
+      aggregateModels.set(key, current);
+    }
+  }
+  const aggregateUsage = codexCards.reduce((sum: number, card: any) => sum + card.usage, 0);
+  const models = Array.from(aggregateModels.values()).map((model: any) => ({
+    ...model,
+    share: aggregateUsage > 0 ? Math.round((model.usage / aggregateUsage) * 1000) / 10 : 0,
+  }));
+  const cacheReusedTokens = codexCards.reduce((sum: number, card: any) => sum + card.cacheReusedTokens, 0);
+  const cacheInputTokens = codexCards.reduce((sum: number, card: any) => sum + card.cacheInputTokens, 0);
+  const aggregate = {
+    source: "codex-all",
+    label: safeCopy("usage.overview.codex_all"),
+    totalPercent: ((aggregateUsage / grandTotal) * 100).toFixed(2),
+    totalPercentValue: (aggregateUsage / grandTotal) * 100,
+    usd: codexCards.reduce((sum: number, card: any) => sum + card.usd, 0),
+    usage: aggregateUsage,
+    cacheHitRate: cacheInputTokens > 0 ? Math.round((cacheReusedTokens / cacheInputTokens) * 100) : null,
+    cacheReusedTokens,
+    cacheInputTokens,
+    models,
+    isSyntheticAggregate: true,
+  };
+  const firstCodexIndex = cards.findIndex((entry: any) => isCodexFleetSource(entry.source));
+  return [
+    ...cards.slice(0, firstCodexIndex),
+    aggregate,
+    ...cards.slice(firstCodexIndex),
+  ];
 }
 
 /**
@@ -228,6 +308,7 @@ export function buildAllModels(fleetData: any) {
   const modelRows = [];
 
   for (const provider of providers) {
+    if (provider?.isSyntheticAggregate) continue;
     const models: any[] = Array.isArray(provider?.models) ? provider.models : [];
     for (const model of models) {
       const usage = toFiniteNumber(model?.usage);

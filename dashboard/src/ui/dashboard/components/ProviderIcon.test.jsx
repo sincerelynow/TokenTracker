@@ -41,6 +41,14 @@ describe("ProviderIcon", () => {
     expect(icon?.querySelector("circle")).toBeNull();
   });
 
+  it("reuses the Codex icon for root and aggregate cards", () => {
+    for (const provider of ["CODEX_IPC", "CODEX ALL", "codex-root:codex-ipc-12345678"]) {
+      const { container } = render(<ProviderIcon provider={provider} size={18} />);
+      const icon = container.querySelector('img[src="/brand-logos/codex.svg"]');
+      expect(icon, provider).not.toBeNull();
+    }
+  });
+
   it("renders the multi-color oh-my-pi brand logo", () => {
     const { container } = render(<ProviderIcon provider="omp" size={20} />);
     const icon = container.querySelector('img[src="/brand-logos/omp.svg"]');

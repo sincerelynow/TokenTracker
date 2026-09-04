@@ -593,9 +593,11 @@
   "settings.codex_roots.duplicate": "このルートは既に登録されています。",
   "settings.codex_roots.detected": "セッションを検出しました",
   "settings.codex_roots.not_detected": "セッションはまだ検出されていません",
+  "settings.codex_roots.stats_label": "使用量カード: {{label}}",
   "settings.codex_roots.wsl_detected": "WSL セッションルート {{path}} も検出されました。",
   "settings.codex_roots.save": "ルートを保存",
   "settings.codex_roots.saving": "保存中...",
   "settings.codex_roots.saved": "Codex スキャンルートを保存しました。",
-  "settings.codex_roots.error": "Codex ルートを保存できませんでした: {{error}}"
+  "settings.codex_roots.error": "Codex ルートを保存できませんでした: {{error}}",
+  "usage.overview.codex_all": "CODEX ALL"
 }

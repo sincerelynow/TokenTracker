@@ -8,6 +8,7 @@ const {
   cmdSync,
   migrateRolloutCumulativeDeltaBuckets,
 } = require("../src/commands/sync");
+const { isCodexRootSource } = require("../src/lib/codex-source");
 const {
   filterColdCodexRolloutFiles,
   parseRolloutIncremental,
@@ -797,7 +798,7 @@ test("v2 source-scoped sync commits a same-inode append without loading historic
     assert.equal(diagnostics.codex_hash_count, 2);
     const rows = await readJsonlRows(queuePath);
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].source, "codex");
+    assert.equal(isCodexRootSource(rows[0].source), true);
     assert.equal(rows[0].total_tokens, 15);
 
     const store = await openCursorStore({ trackerDir, cursorsPath });
@@ -1049,7 +1050,7 @@ test("v2 sync restarts the full Codex parse after an event-shard fallback", asyn
 
     const rows = await readJsonlRows(queuePath);
     assert.equal(rows.length, 2);
-    assert.equal(rows[1].source, "codex");
+    assert.equal(isCodexRootSource(rows[1].source), true);
     assert.equal(rows[1].total_tokens, 35);
 
     const reopened = await openCursorStore({ trackerDir, cursorsPath });
@@ -1131,7 +1132,7 @@ test("v2 replays a sync after a failed manifest swap without inflating totals", 
     await store.materializeAllCodexState();
     assert.deepEqual(store.cursors.codexHashes, [`${sessionId}:${timestamp}`]);
     const total = Object.entries(store.cursors.hourly.buckets)
-      .filter(([key]) => key.startsWith("codex|"))
+      .filter(([key]) => isCodexRootSource(key.split("|", 1)[0]))
       .reduce((sum, [, bucket]) => sum + Number(bucket.totals.total_tokens || 0), 0);
     assert.equal(total, 20);
   });
@@ -1246,8 +1247,9 @@ test("configured Codex roots are unioned, deduplicated, and stop scanning after 
 
     await cmdSync(["--auto", "--from-retry", "--source=codex"]);
     const queuePath = path.join(trackerDir, "queue.jsonl");
-    const firstRows = (await readJsonlRows(queuePath)).filter((row) => row.source === "codex");
+    const firstRows = (await readJsonlRows(queuePath)).filter((row) => isCodexRootSource(row.source));
     assert.equal(firstRows.reduce((sum, row) => sum + row.total_tokens, 0), 30);
+    assert.equal(new Set(firstRows.map((row) => row.source)).size, 2);
 
     await fs.writeFile(path.join(trackerDir, "config.json"), `${JSON.stringify({ codexHomes: [first] })}\n`);
     const removedRootId = "00000000-0000-4000-8000-000000000003";
@@ -1256,7 +1258,7 @@ test("configured Codex roots are unioned, deduplicated, and stop scanning after 
       `${JSON.stringify(codexTokenEvent("2030-06-02T12:02:00.000Z", 40))}\n`,
     );
     await cmdSync(["--auto", "--from-retry", "--source=codex"]);
-    const secondRows = (await readJsonlRows(queuePath)).filter((row) => row.source === "codex");
+    const secondRows = (await readJsonlRows(queuePath)).filter((row) => isCodexRootSource(row.source));
     assert.equal(secondRows.reduce((sum, row) => sum + row.total_tokens, 0), 30);
   } finally {
     if (previousCodexHome === undefined) delete process.env.CODEX_HOME;

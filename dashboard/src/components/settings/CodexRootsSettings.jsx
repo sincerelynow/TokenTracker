@@ -5,7 +5,9 @@ import { Button } from "../../ui/components";
 import { SectionCard } from "./Controls.jsx";
 
 function editableRoots(roots) {
-  return (roots || []).filter((root) => root.origin !== "wsl").map((root) => root.path);
+  return (roots || [])
+    .filter((root) => root.origin !== "wsl")
+    .map((root) => ({ path: root.path, key: root.key, label: root.label }));
 }
 
 export function CodexRootsSettings({ rootsState }) {
@@ -21,7 +23,7 @@ export function CodexRootsSettings({ rootsState }) {
     const seen = new Map();
     const duplicates = new Set();
     drafts.forEach((value, index) => {
-      const key = value.trim().replace(/[\\/]+$/, "").toLowerCase();
+      const key = value.path.trim().replace(/[\\/]+$/, "").toLowerCase();
       if (!key) return;
       if (seen.has(key)) {
         duplicates.add(seen.get(key));
@@ -35,7 +37,9 @@ export function CodexRootsSettings({ rootsState }) {
 
   const updateDraft = (index, value) => {
     setSaved(false);
-    setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index ? value : entry));
+    setDrafts((current) => current.map((entry, entryIndex) => (
+      entryIndex === index ? { ...entry, path: value } : entry
+    )));
   };
 
   const submit = async () => {
@@ -57,7 +61,7 @@ export function CodexRootsSettings({ rootsState }) {
           type="button"
           size="sm"
           variant="secondary"
-          onClick={() => setDrafts((current) => [...current, ""])}
+          onClick={() => setDrafts((current) => [...current, { path: "" }])}
           disabled={saving || drafts.length >= maxRoots}
           title={copy("settings.codex_roots.add")}
         >
@@ -68,13 +72,13 @@ export function CodexRootsSettings({ rootsState }) {
     >
       <div className="space-y-3 py-3">
         {drafts.map(function renderRoot(value, index) {
-          const state = roots?.find(function findRoot(root) { return root.path === value; });
+          const state = roots?.find(function findRoot(root) { return root.path === value.path; });
           const duplicate = duplicateIndexes.has(index);
           return (
             <div key={index} className="flex min-w-0 items-start gap-2">
               <div className="min-w-0 flex-1">
                 <input
-                  value={value}
+                  value={value.path}
                   onChange={(event) => updateDraft(index, event.target.value)}
                   aria-label={copy("settings.codex_roots.path", { index: index + 1 })}
                   placeholder={copy("settings.codex_roots.placeholder")}
@@ -87,6 +91,11 @@ export function CodexRootsSettings({ rootsState }) {
                       ? copy("settings.codex_roots.detected")
                       : copy("settings.codex_roots.not_detected")}
                 </p>
+                {value.label ? (
+                  <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+                    {copy("settings.codex_roots.stats_label", { label: value.label })}
+                  </p>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -109,7 +118,7 @@ export function CodexRootsSettings({ rootsState }) {
         <div className="flex items-center justify-end gap-3 pt-1">
           {error ? <p role="alert" className="min-w-0 flex-1 text-xs text-red-600 dark:text-red-400">{copy("settings.codex_roots.error", { error: error.message })}</p> : null}
           {saved ? <p role="status" className="text-xs text-emerald-600 dark:text-emerald-400">{copy("settings.codex_roots.saved")}</p> : null}
-          <Button type="button" size="sm" onClick={submit} disabled={saving || drafts.some((value) => !value.trim()) || duplicateIndexes.size > 0}>
+          <Button type="button" size="sm" onClick={submit} disabled={saving || drafts.some((value) => !value.path.trim()) || duplicateIndexes.size > 0}>
             <Save className="mr-1.5 h-4 w-4" aria-hidden />
             {saving ? copy("settings.codex_roots.saving") : copy("settings.codex_roots.save")}
           </Button>

@@ -13,7 +13,7 @@ vi.mock("./Controls.jsx", () => ({
   SectionCard: ({ title, action, children }) => React.createElement("section", null, title, action, children),
 }));
 
-const root = { path: "/home/me/.codex", origin: "default", exists: true, has_sessions: true, has_archived_sessions: false };
+const root = { path: "/home/me/.codex", key: "codex-12345678", label: "CODEX", origin: "default", exists: true, has_sessions: true, has_archived_sessions: false };
 
 describe("CodexRootsSettings", () => {
   it("adds, removes, and saves roots", async () => {
@@ -23,7 +23,11 @@ describe("CodexRootsSettings", () => {
     const inputs = screen.getAllByRole("textbox");
     fireEvent.change(inputs[1], { target: { value: "/home/me/.codex-ipc" } });
     fireEvent.click(screen.getByRole("button", { name: /settings.codex_roots.save/ }));
-    await waitFor(() => expect(save).toHaveBeenCalledWith(["/home/me/.codex", "/home/me/.codex-ipc"]));
+    await waitFor(() => expect(save).toHaveBeenCalledWith([
+      { path: "/home/me/.codex", key: "codex-12345678", label: "CODEX" },
+      { path: "/home/me/.codex-ipc" },
+    ]));
+    expect(screen.getByText("settings.codex_roots.stats_label")).toBeVisible();
     await screen.findByText("settings.codex_roots.saved");
 
     fireEvent.click(screen.getByRole("button", { name: "settings.codex_roots.remove 2" }));

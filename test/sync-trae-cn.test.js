@@ -431,7 +431,7 @@ test("failed TRAE CN fetch skips parser/queue/cursor mutation while other provid
     );
     await cmdSync(["--auto"], opts);
     const rows = readQueueRows(home);
-    assert.ok(rows.some((row) => row.source === "codex"), "unrelated provider continued");
+    assert.ok(rows.some((row) => String(row.source).startsWith("codex-root:")), "unrelated provider continued");
     assert.ok(!rows.some((row) => row.source === "trae-cn"), "no trae-cn rows after failure");
     assert.equal(readCursors(home).traeCn, undefined);
   });

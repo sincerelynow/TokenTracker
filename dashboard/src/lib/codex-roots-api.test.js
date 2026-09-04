@@ -9,19 +9,20 @@ describe("Codex roots API", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("authenticates reads and writes", async () => {
-    const payload = { ok: true, roots: [{ path: "/home/me/.codex" }], configured: true };
+    const root = { path: "/home/me/.codex", key: "codex-12345678", label: "CODEX" };
+    const payload = { ok: true, roots: [root], configured: true };
     const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify(payload)));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getCodexRoots()).resolves.toEqual(payload);
-    await expect(updateCodexRoots(["/home/me/.codex"])).resolves.toEqual(payload);
+    await expect(updateCodexRoots([root])).resolves.toEqual(payload);
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({
       method: "GET",
       headers: expect.objectContaining({ "x-tokentracker-local-auth": "token" }),
     }));
     expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ roots: ["/home/me/.codex"] }),
+      body: JSON.stringify({ roots: [root] }),
       headers: expect.objectContaining({ "x-tokentracker-local-auth": "token" }),
     }));
   });

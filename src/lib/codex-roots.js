@@ -1,12 +1,18 @@
 "use strict";
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const os = require("node:os");
 const path = require("node:path");
 
 const { writeFileAtomic, chmod600IfPossible } = require("./fs");
 const wsl = require("./wsl-probe");
 const { resolveInstallPaths } = require("./install-resolver");
+const {
+  codexRootLabelFromKey,
+  codexRootSource,
+  normalizeCodexRootKey,
+} = require("./codex-source");
 
 const MAX_CODEX_ROOTS = 16;
 
@@ -32,13 +38,14 @@ function readConfig(configPath) {
   }
 }
 
-function expandHome(input, home) {
+function expandHome(input, home, platform = process.platform) {
   const value = typeof input === "string" ? input.trim() : "";
   if (!value) throw new CodexRootsError("Codex root must not be empty");
   if (value === "~") return path.resolve(home);
   if (value.startsWith("~/") || value.startsWith("~\\")) {
     return path.resolve(home, value.slice(2));
   }
+  if (platform === "win32" && path.win32.isAbsolute(value)) return value;
   return path.resolve(value);
 }
 
@@ -49,7 +56,7 @@ function identityFor(root, platform = process.platform) {
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
-  identity = path.normalize(identity);
+  identity = platform === "win32" ? path.win32.normalize(identity) : path.normalize(identity);
   return platform === "win32" ? identity.toLowerCase() : identity;
 }
 
@@ -60,11 +67,12 @@ function validateRoot(input, {
 } = {}) {
   const raw = typeof input === "string" ? input.trim() : "";
   if (!raw) throw new CodexRootsError("Codex root must not be empty");
-  if (raw !== "~" && !raw.startsWith("~/") && !raw.startsWith("~\\") && !path.isAbsolute(raw)) {
+  const pathApi = platform === "win32" ? path.win32 : path;
+  if (raw !== "~" && !raw.startsWith("~/") && !raw.startsWith("~\\") && !pathApi.isAbsolute(raw)) {
     throw new CodexRootsError(`Codex root must be an absolute path: ${raw}`);
   }
-  const root = expandHome(raw, home);
-  if (path.parse(root).root === root) {
+  const root = expandHome(raw, home, platform);
+  if (pathApi.parse(root).root === root) {
     throw new CodexRootsError(`Codex root must not be a filesystem root: ${raw}`);
   }
   try {
@@ -74,7 +82,7 @@ function validateRoot(input, {
     if (error instanceof CodexRootsError) throw error;
     if (error?.code !== "ENOENT") throw new CodexRootsError(`Unable to inspect Codex root ${raw}: ${error.message}`);
     if (!requireExistingParent) return { path: root, identity: identityFor(root, platform) };
-    const parent = path.dirname(root);
+    const parent = pathApi.dirname(root);
     try {
       if (!fs.statSync(parent).isDirectory()) {
         throw new CodexRootsError(`Codex root parent is not a directory: ${raw}`);
@@ -92,7 +100,7 @@ function normalizeConfiguredRoots(inputs, options = {}) {
   const roots = [];
   const identities = new Set();
   for (const input of inputs) {
-    const normalized = validateRoot(input, options);
+    const normalized = validateRoot(typeof input === "string" ? input : input?.path, options);
     if (identities.has(normalized.identity)) continue;
     identities.add(normalized.identity);
     roots.push(normalized.path);
@@ -104,7 +112,52 @@ function normalizeConfiguredRoots(inputs, options = {}) {
   return roots;
 }
 
-function probeRoot(root, origin) {
+function rootKeyBase(root) {
+  const base = path.basename(root).replace(/^\.+/, "").toLowerCase();
+  const slug = base.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "codex";
+}
+
+function derivedRootKey(root, identity) {
+  const digest = crypto.createHash("sha256").update(identity).digest("hex").slice(0, 8);
+  return `${rootKeyBase(root).slice(0, 53)}-${digest}`;
+}
+
+function normalizeRootRecords(inputs, options = {}) {
+  if (!Array.isArray(inputs)) throw new CodexRootsError("roots must be an array");
+  const home = options.home || os.homedir();
+  const platform = options.platform || process.platform;
+  const resolvedOptions = { ...options, home, platform };
+  const paths = normalizeConfiguredRoots(inputs, resolvedOptions);
+  const records = [];
+  const usedKeys = new Set();
+  const usedLabels = new Set();
+  for (const root of paths) {
+    const identity = identityFor(root, platform);
+    const original = inputs.find((input) => {
+      try {
+        return identityFor(expandHome(typeof input === "string" ? input : input?.path, home, platform), platform) === identity;
+      } catch {
+        return false;
+      }
+    });
+    let key = normalizeCodexRootKey(typeof original === "object" ? original?.key : null)
+      || derivedRootKey(root, identity);
+    if (usedKeys.has(key)) key = derivedRootKey(root, `${identity}:${records.length}`);
+    usedKeys.add(key);
+    let label = typeof original === "object" && typeof original?.label === "string" && original.label.trim()
+      ? original.label.trim().slice(0, 64)
+      : codexRootLabelFromKey(key);
+    if (usedLabels.has(label.toLowerCase())) {
+      label = `${label.slice(0, 55)}_${key.slice(-8).toUpperCase()}`;
+    }
+    usedLabels.add(label.toLowerCase());
+    records.push({ path: root, key, label });
+  }
+  return records;
+}
+
+function probeRoot(root, origin, metadata = {}) {
   let exists = false;
   let isDirectory = false;
   try {
@@ -121,6 +174,9 @@ function probeRoot(root, origin) {
   };
   return {
     path: root,
+    key: metadata.key,
+    label: metadata.label,
+    stats_source: metadata.key ? codexRootSource(metadata.key) : undefined,
     origin,
     exists: exists && isDirectory,
     has_sessions: isDirectory && childExists("sessions"),
@@ -143,10 +199,10 @@ function resolveCodexRootsSync({
   const rawRoots = configured
     ? config.codexHomes
     : [source === "environment" ? env.CODEX_HOME.trim() : path.join(home, ".codex")];
-  const roots = normalizeConfiguredRoots(rawRoots, { home, platform, requireExistingParent: false });
+  const roots = normalizeRootRecords(rawRoots, { home, platform, requireExistingParent: false });
   const includeNative = platform !== "win32" || wsl.shouldProbeNative(env);
-  const states = includeNative ? roots.map((root) => probeRoot(root, source)) : [];
-  const identities = new Set(roots.map((root) => identityFor(root, platform)));
+  const states = includeNative ? roots.map((root) => probeRoot(root.path, source, root)) : [];
+  const identities = new Set(roots.map((root) => identityFor(root.path, platform)));
 
   if (includeWsl && platform === "win32" && wsl.shouldProbeWsl(env)) {
     const wslRoot = discoverWslHome !== wsl.discoverWslHome
@@ -159,7 +215,13 @@ function resolveCodexRootsSync({
         }, env, { platform }).wsl;
     if (wslRoot) {
       const identity = identityFor(wslRoot, platform);
-      const state = probeRoot(path.resolve(wslRoot), "wsl");
+      const resolvedWslRoot = path.resolve(wslRoot);
+      const wslIdentity = identityFor(resolvedWslRoot, platform);
+      const wslKey = derivedRootKey(resolvedWslRoot, wslIdentity);
+      const state = probeRoot(resolvedWslRoot, "wsl", {
+        key: wslKey,
+        label: codexRootLabelFromKey(wslKey),
+      });
       if (!identities.has(identity) && (state.has_sessions || state.has_archived_sessions)) {
         states.push(state);
       }
@@ -180,7 +242,7 @@ async function saveCodexRoots(inputs, {
   platform = process.platform,
   env = process.env,
 } = {}) {
-  const roots = normalizeConfiguredRoots(inputs, { home, platform });
+  const roots = normalizeRootRecords(inputs, { home, platform });
   const config = readConfig(configPath);
   await writeFileAtomic(configPath, `${JSON.stringify({ ...config, codexHomes: roots }, null, 2)}\n`, { mode: 0o600 });
   await chmod600IfPossible(configPath);
@@ -193,6 +255,7 @@ module.exports = {
   configPathFor,
   validateRoot,
   normalizeConfiguredRoots,
+  normalizeRootRecords,
   resolveCodexRootsSync,
   resolveCodexRootPaths,
   saveCodexRoots,

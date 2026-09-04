@@ -502,6 +502,8 @@
   "sessions.page.refresh": "세션 새로 고침",
   "sessions.filter.source_all": "전체",
   "sessions.filter.source_aria": "세션 소스로 필터링",
+  "sessions.filter.codex_all": "CODEX ALL",
+  "sessions.filter.codex_root_aria": "Codex 루트로 필터링",
   "sessions.filter.range_all": "전체 기간",
   "sessions.filter.range_aria": "기간으로 필터링",
   "sessions.filter.range_7d": "7일",

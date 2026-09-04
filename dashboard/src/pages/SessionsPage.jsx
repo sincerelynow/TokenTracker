@@ -26,6 +26,7 @@ const NO_SESSIONS = [];
 // filtered in memory; only the rendered slice grows as the user scrolls, so a
 // few thousand sessions stay responsive without a virtualization dependency.
 const PAGE_SIZE = 100;
+const CODEX_INSTANCE_ALL = "all";
 
 const SOURCE_FILTERS = [
   { id: "all", label: () => copy("sessions.filter.source_all") },
@@ -433,6 +434,7 @@ export function SessionsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [codexInstanceFilter, setCodexInstanceFilter] = useState(CODEX_INSTANCE_ALL);
   const [rangeFilter, setRangeFilter] = useState("all");
   const [projectFilter, setProjectFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -473,6 +475,33 @@ export function SessionsPage() {
   }, [load]);
 
   const allSessions = data?.sessions || NO_SESSIONS;
+  const codexInstanceOptions = useMemo(() => {
+    const instances = new Map();
+    for (const row of allSessions) {
+      if (row.source !== "codex") continue;
+      const key = typeof row.source_instance === "string" ? row.source_instance.trim() : "";
+      if (!key || instances.has(key)) continue;
+      const label = typeof row.instance_label === "string" && row.instance_label.trim()
+        ? row.instance_label.trim()
+        : key;
+      instances.set(key, label);
+    }
+    return [
+      { id: CODEX_INSTANCE_ALL, label: copy("sessions.filter.codex_all") },
+      ...Array.from(instances, ([id, label]) => ({ id, label }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    ];
+  }, [allSessions, resolvedLocale]);
+  const hasMultipleCodexInstances = codexInstanceOptions.length > 2;
+
+  useEffect(() => {
+    if (
+      codexInstanceFilter !== CODEX_INSTANCE_ALL &&
+      !codexInstanceOptions.some((option) => option.id === codexInstanceFilter)
+    ) {
+      setCodexInstanceFilter(CODEX_INSTANCE_ALL);
+    }
+  }, [codexInstanceFilter, codexInstanceOptions]);
   // Distinct project names present in the loaded sessions, for the project
   // filter dropdown. Keyed by project_key (what the row filter matches on).
   const projectOptions = useMemo(() => {
@@ -496,13 +525,19 @@ export function SessionsPage() {
     const startMs = rangeStartMs(rangeFilter);
     return allSessions.filter((row) => {
       if (sourceFilter !== "all" && row.source !== sourceFilter) return false;
+      if (
+        sourceFilter === "codex" &&
+        hasMultipleCodexInstances &&
+        codexInstanceFilter !== CODEX_INSTANCE_ALL &&
+        row.source_instance !== codexInstanceFilter
+      ) return false;
       if (projectFilter !== "all" && row.project_key !== projectFilter) return false;
       if (!overlapsRange(row, startMs)) return false;
       if (!q) return true;
       const haystack = `${row.title || ""} ${row.project_key || ""} ${row.model || ""} ${row.agent_nickname || ""} ${row.agent_role || ""} ${row.project_ref || ""} ${row.session_id || ""}`.toLowerCase();
       return haystack.includes(q);
     });
-  }, [allSessions, sourceFilter, projectFilter, rangeFilter, deferredQuery]);
+  }, [allSessions, sourceFilter, codexInstanceFilter, hasMultipleCodexInstances, projectFilter, rangeFilter, deferredQuery]);
 
   const grouped = useMemo(() => {
     const visibleHashes = new Set(filtered.map((row) => row.session_hash));
@@ -529,7 +564,11 @@ export function SessionsPage() {
     };
   }, [filtered]);
 
-  const anyFilter = sourceFilter !== "all" || rangeFilter !== "all" || projectFilter !== "all" || searchQuery.trim() !== "";
+  const anyFilter = sourceFilter !== "all"
+    || (sourceFilter === "codex" && hasMultipleCodexInstances && codexInstanceFilter !== CODEX_INSTANCE_ALL)
+    || rangeFilter !== "all"
+    || projectFilter !== "all"
+    || searchQuery.trim() !== "";
 
   // Restart the rendered window whenever the result set changes, so a narrower
   // filter doesn't leave the user scrolled into a stale slice.
@@ -537,7 +576,7 @@ export function SessionsPage() {
     setVisibleCount(PAGE_SIZE);
     setExpandedThreads(new Set());
     setThreadModelFilters(new Map());
-  }, [sourceFilter, projectFilter, rangeFilter, deferredQuery, allSessions]);
+  }, [sourceFilter, codexInstanceFilter, projectFilter, rangeFilter, deferredQuery, allSessions]);
 
   const visible = useMemo(() => grouped.roots.slice(0, visibleCount), [grouped.roots, visibleCount]);
   const hasMore = grouped.roots.length > visible.length;
@@ -631,6 +670,16 @@ export function SessionsPage() {
               value={sourceFilter}
               onChange={setSourceFilter}
             />
+
+            {sourceFilter === "codex" && hasMultipleCodexInstances ? (
+              <SegmentedControl
+                className="max-w-full overflow-x-auto"
+                ariaLabel={copy("sessions.filter.codex_root_aria")}
+                options={codexInstanceOptions}
+                value={codexInstanceFilter}
+                onChange={setCodexInstanceFilter}
+              />
+            ) : null}
 
             <SegmentedControl
               className="pl-2"

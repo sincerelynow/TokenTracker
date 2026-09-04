@@ -509,6 +509,8 @@
   "sessions.page.refresh": "重新整理工作階段",
   "sessions.filter.source_all": "全部",
   "sessions.filter.source_aria": "依工作階段來源篩選",
+  "sessions.filter.codex_all": "CODEX ALL",
+  "sessions.filter.codex_root_aria": "依 Codex 目錄篩選",
   "sessions.filter.range_all": "全部時間",
   "sessions.filter.range_aria": "依日期範圍篩選",
   "sessions.filter.range_7d": "7 天",

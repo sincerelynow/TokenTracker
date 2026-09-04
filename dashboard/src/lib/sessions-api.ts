@@ -20,6 +20,8 @@ export interface SessionRow {
   parent_link_conflict: boolean;
   title: string | null;
   source: SessionSource;
+  source_instance?: string;
+  instance_label?: string | null;
   project_key: string;
   project_ref: string | null;
   model: string;

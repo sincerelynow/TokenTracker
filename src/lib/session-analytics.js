@@ -16,8 +16,10 @@
 //   - `session_id` — the vendor session UUID, needed for `--resume`.
 //   - `project_ref` — the session's working directory. The resume command only
 //     works from that directory, so the UI shows it and lets the user copy it.
+//   - `source_instance` / `instance_label` — opaque Codex root identity used
+//     by the local session browser's root filter.
 //
-// All three are stripped in summarizeSessions() before anything reaches the
+// These fields are stripped in summarizeSessions() before anything reaches the
 // cloud or a CSV export, and the browser endpoint that keeps them is served
 // only over loopback. `test/session-analytics.test.js` guards that boundary —
 // if you add a field here, decide which side of it the field belongs on.
@@ -33,7 +35,7 @@ const { parseCodexRolloutFile } = require("./codex-rollout-parser");
 const { computeRowCost } = require("./pricing");
 const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
 const wsl = require("./wsl-probe");
-const { resolveCodexRootPaths } = require("./codex-roots");
+const { resolveCodexRootsSync } = require("./codex-roots");
 
 // Bump the sidecar when derived metrics change so cached rows are rebuilt
 // instead of leaving the dashboard on the previous (over-counted) heuristic.
@@ -60,7 +62,10 @@ const { resolveCodexRootPaths } = require("./codex-roots");
 // cost, and adds metadata-only usage diagnostics to the local session browser.
 // v12 retains Codex parent/subagent metadata locally and derives exact child
 // token totals from observed child rollouts instead of spawn-call estimates.
-const SIDECAR_VERSION = 12;
+// v13 retains Codex root identity for the local-only session browser. The
+// provider source stays `codex`; opaque root keys and display labels are a
+// separate dimension and are stripped from non-browser analytics payloads.
+const SIDECAR_VERSION = 13;
 const EDIT_TOOLS = new Set([
   "apply_patch",
   "edit",
@@ -497,7 +502,7 @@ async function scanCodexDeliverySignals(filePath) {
   };
 }
 
-async function scanCodexSession(filePath) {
+async function scanCodexSession(filePath, instance = {}) {
   const filePaths = readableSessionPaths(filePath);
   const primaryFilePath = filePaths[0] || String(filePath || "");
   const [parsed, signals] = await Promise.all([
@@ -518,6 +523,12 @@ async function scanCodexSession(filePath) {
   const title = parsed.sessionId
     ? filePaths.map(loadCodexTitleIndex).map((index) => index.get(parsed.sessionId)).find(Boolean) || null
     : null;
+  const sourceInstance = typeof instance?.key === "string" && instance.key.trim()
+    ? instance.key.trim()
+    : null;
+  const instanceLabel = typeof instance?.label === "string" && instance.label.trim()
+    ? instance.label.trim()
+    : null;
   return finalizeRecord({
     version: SIDECAR_VERSION,
     session_hash: sessionHash("codex", parsed.sessionId || primaryFilePath),
@@ -537,6 +548,8 @@ async function scanCodexSession(filePath) {
     // Local-only: stripped in summarizeSessions before any cloud/CSV export.
     title,
     source: "codex",
+    ...(sourceInstance ? { source_instance: sourceInstance } : {}),
+    ...(sourceInstance && instanceLabel ? { instance_label: instanceLabel } : {}),
     project_key: projectKey(parsed.cwd, primaryFilePath),
     project_ref: parsed.cwd || null,
     model,
@@ -863,19 +876,7 @@ function providerRoots(home, providerDir, env, deps = {}) {
   const homedir = deps.homedir || os.homedir;
   const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
   if (providerDir === ".codex") {
-    const probeWsl = deps.probeWsl !== undefined
-      ? Boolean(deps.probeWsl)
-      : path.resolve(home) === path.resolve(homedir());
-    const resolver = deps.resolveCodexRootPaths || resolveCodexRootPaths;
-    const isProcessHome = path.resolve(home) === path.resolve(homedir());
-    const codexEnv = isProcessHome ? env : { ...env, CODEX_HOME: "" };
-    return resolver({
-      home,
-      env: codexEnv,
-      platform,
-      includeWsl: probeWsl,
-      discoverWslHome,
-    });
+    return codexProviderRootRecords(home, env, deps).map((root) => root.path);
   }
   const roots = [];
   if (platform !== "win32" || wsl.shouldProbeNative(env)) {
@@ -905,6 +906,33 @@ function providerRoots(home, providerDir, env, deps = {}) {
     if (wslRoot) roots.push(wslRoot);
   }
   return [...new Set(roots)];
+}
+
+function codexProviderRootRecords(home, env, deps = {}) {
+  const platform = deps.platform || process.platform;
+  const homedir = deps.homedir || os.homedir;
+  const discoverWslHome = deps.discoverWslHome || wsl.discoverWslHome;
+  const probeWsl = deps.probeWsl !== undefined
+    ? Boolean(deps.probeWsl)
+    : path.resolve(home) === path.resolve(homedir());
+  const isProcessHome = path.resolve(home) === path.resolve(homedir());
+  const codexEnv = isProcessHome ? env : { ...env, CODEX_HOME: "" };
+  const resolverOptions = {
+    home,
+    env: codexEnv,
+    platform,
+    includeWsl: probeWsl,
+    discoverWslHome,
+  };
+  if (!deps.resolveCodexRootsSync && typeof deps.resolveCodexRootPaths === "function") {
+    return deps.resolveCodexRootPaths(resolverOptions).map((rootPath) => ({
+      path: rootPath,
+      key: null,
+      label: null,
+    }));
+  }
+  const resolver = deps.resolveCodexRootsSync || resolveCodexRootsSync;
+  return resolver(resolverOptions).roots;
 }
 
 // Group one logical session discovered under more than one root. A group is
@@ -1012,18 +1040,22 @@ function dedupeClaudeFilesAcrossRoots(groups) {
   return [...new Set(out)];
 }
 
-function groupCodexFiles(filePaths) {
+function groupCodexFiles(entries) {
   const ordered = [];
   const bySession = new Map();
-  for (const filePath of [...new Set(filePaths || [])]) {
+  const seenPaths = new Set();
+  for (const entry of entries || []) {
+    const filePath = entry?.filePath;
+    if (!filePath || seenPaths.has(filePath)) continue;
+    seenPaths.add(filePath);
     const id = path.basename(filePath).match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] || filePath;
     let group = bySession.get(id);
     if (!group) {
-      group = [];
+      group = { filePaths: [], instance: entry.instance };
       bySession.set(id, group);
       ordered.push(group);
     }
-    group.push(filePath);
+    group.filePaths.push(filePath);
   }
   return ordered;
 }
@@ -1031,16 +1063,20 @@ function groupCodexFiles(filePaths) {
 async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const grokHome = resolveGrokHome(home);
   const claudeRoots = providerRoots(home, ".claude", env, deps);
-  const codexRoots = providerRoots(home, ".codex", env, deps);
+  const codexRoots = Array.isArray(deps.codexRoots)
+    ? deps.codexRoots
+    : codexProviderRootRecords(home, env, deps);
   const [claudeGroups, codexGroups, archivedGroups, grok] = await Promise.all([
     Promise.all(claudeRoots.map((r) => listClaudeProjectFiles(path.join(r, "projects")))),
-    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "sessions")))),
-    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r, "archived_sessions")))),
+    Promise.all(codexRoots.map((root) => listRolloutFilesDeep(path.join(root.path, "sessions")))),
+    Promise.all(codexRoots.map((root) => listRolloutFilesDeep(path.join(root.path, "archived_sessions")))),
     listGrokSessionFiles(path.join(grokHome, "sessions")),
   ]);
   const allClaude = groupClaudeFilesAcrossRoots(claudeGroups);
-  const codex = [...new Set(codexGroups.flat())];
-  const archived = [...new Set(archivedGroups.flat())];
+  const codexEntries = codexRoots.flatMap((root, index) => [
+    ...(codexGroups[index] || []),
+    ...(archivedGroups[index] || []),
+  ].map((filePath) => ({ filePath, instance: { key: root.key, label: root.label } })));
   // Claude Memory stores thousands of background observer transcripts beside
   // real Claude Code sessions. They contain <synthetic>/haiku bookkeeping and
   // no user coding outcome, so scanning them both slows the card dramatically
@@ -1048,7 +1084,15 @@ async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const claude = allClaude.filter((filePaths) => !filePaths.some((filePath) => filePath
     .split(path.sep)
     .some((segment) => segment.endsWith(CLAUDE_MEM_OBSERVER_PROJECT_SUFFIX))));
-  return { claude, codex: groupCodexFiles([...codex, ...archived]), grok };
+  return { claude, codex: groupCodexFiles(codexEntries), grok };
+}
+
+function codexRootsSignature(roots) {
+  return crypto.createHash("sha256").update(JSON.stringify((roots || []).map((root) => ({
+    path: path.resolve(root.path),
+    key: root.key || "",
+    label: root.label || "",
+  })))).digest("hex");
 }
 
 function filesSignature(files) {
@@ -1062,11 +1106,11 @@ function filesSignature(files) {
   return hash.digest("hex");
 }
 
-function sessionFileCacheKey(source, filePath) {
+function sessionFileCacheKey(source, filePath, instance) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   return crypto
     .createHash("sha256")
-    .update(`${source}\0${filePaths.map((value) => path.resolve(value)).join("\0")}`)
+    .update(`${source}\0${instance?.key || ""}\0${instance?.label || ""}\0${filePaths.map((value) => path.resolve(value)).join("\0")}`)
     .digest("hex")
     .slice(0, 24);
 }
@@ -1159,6 +1203,8 @@ async function writeAtomic(filePath, content) {
 async function buildSessionAnalyticsInternal({ home = os.homedir(), force = false, cacheTtlMs = 5 * 60_000 } = {}) {
   const sidecarPath = resolveSessionSidecarPath(home);
   const metaPath = `${sidecarPath}.meta.json`;
+  const codexRoots = codexProviderRootRecords(home, process.env);
+  const rootSignature = codexRootsSignature(codexRoots);
   let previousMeta = null;
   if (!force) {
     try {
@@ -1166,6 +1212,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       const checkedAt = Date.parse(previousMeta.checked_at || previousMeta.generated_at || "");
       if (
         previousMeta.version === SIDECAR_VERSION &&
+        previousMeta.codex_roots_signature === rootSignature &&
         Number.isFinite(checkedAt) &&
         Date.now() - checkedAt < Math.max(0, Number(cacheTtlMs) || 0)
       ) {
@@ -1173,20 +1220,25 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       }
     } catch { /* first run */ }
   }
-  const discovered = await discoverSessionFiles(home);
+  const discovered = await discoverSessionFiles(home, process.env, { codexRoots });
   // Codex thread titles are stored separately from rollout files. Include the
   // index in the overall signature so an index-only rename reaches the
   // per-file dependency check below on the next refresh. Grok titles/metadata
   // live in sibling summary.json / signals.json next to updates.jsonl.
   const signature = filesSignature([
     ...discovered.claude.flat(),
-    ...discovered.codex.flat(),
-    ...discovered.codex.flat().map(codexTitleIndexPathFor).filter(Boolean),
+    ...discovered.codex.flatMap((group) => group.filePaths),
+    ...discovered.codex.flatMap((group) => group.filePaths).map(codexTitleIndexPathFor).filter(Boolean),
     ...discovered.grok,
     ...discovered.grok.map(grokSummaryPathFor),
     ...discovered.grok.map(grokSignalsPathFor),
   ]);
-  if (!force && previousMeta?.version === SIDECAR_VERSION && previousMeta.signature === signature) {
+  if (
+    !force &&
+    previousMeta?.version === SIDECAR_VERSION &&
+    previousMeta.signature === signature &&
+    previousMeta.codex_roots_signature === rootSignature
+  ) {
     await writeAtomic(metaPath, `${JSON.stringify({ ...previousMeta, checked_at: new Date().toISOString() })}\n`);
     return readSidecar(sidecarPath);
   }
@@ -1204,7 +1256,12 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   const sessions = [];
   const entries = [
     ...discovered.claude.map((filePaths) => ({ source: "claude", filePath: filePaths, scan: scanClaudeSession })),
-    ...discovered.codex.map((filePaths) => ({ source: "codex", filePath: filePaths, scan: scanCodexSession })),
+    ...discovered.codex.map((group) => ({
+      source: "codex",
+      filePath: group.filePaths,
+      instance: group.instance,
+      scan: scanCodexSession,
+    })),
     ...discovered.grok.map((filePath) => ({ source: "grok", filePath, scan: scanGrokSession })),
   ];
   // Files we could not turn into a row (permission denied, half-written line,
@@ -1212,7 +1269,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   // no signal at all; count them so the API can say so.
   let skippedFiles = 0;
   for (const entry of entries) {
-    const cacheKey = sessionFileCacheKey(entry.source, entry.filePath);
+    const cacheKey = sessionFileCacheKey(entry.source, entry.filePath, entry.instance);
     const statKey = analyticsEntryStatKey(entry.source, entry.filePath);
     if (!statKey) {
       skippedFiles += 1;
@@ -1224,7 +1281,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     }
     if (!row) {
       try {
-        row = await entry.scan(entry.filePath);
+        row = await entry.scan(entry.filePath, entry.instance);
       } catch (error) {
         // One active/partial session must not poison the sidecar, but do not
         // pretend it never existed either.
@@ -1248,6 +1305,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   await writeAtomic(metaPath, `${JSON.stringify({
     version: SIDECAR_VERSION,
     signature,
+    codex_roots_signature: rootSignature,
     generated_at: generatedAt,
     checked_at: generatedAt,
     files: nextFiles,
@@ -1398,6 +1456,8 @@ function summarizeSessions(sessions, { from = "", to = "", includeSessions = tru
         parent_link_conflict: _parentLinkConflict,
         orphaned_subagent: _orphanedSubagent,
         title: _title,
+        source_instance: _sourceInstance,
+        instance_label: _instanceLabel,
         _cache_key: _cacheKey,
         ...row
       }) => row)
@@ -1460,6 +1520,10 @@ function toSessionBrowserRow(row) {
     parent_link_conflict: Boolean(row.parent_link_conflict),
     title: row.title || null,
     source: row.source,
+    ...(row.source === "codex" && row.source_instance ? {
+      source_instance: row.source_instance,
+      instance_label: row.instance_label || null,
+    } : {}),
     project_key: row.project_key,
     // project_ref (the local cwd) only ever travels over the local API so the
     // browser can show where a session ran and compose a resume command.

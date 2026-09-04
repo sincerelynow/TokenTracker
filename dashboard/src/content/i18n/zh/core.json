@@ -577,6 +577,8 @@
   "sessions.page.refresh": "刷新会话",
   "sessions.filter.source_all": "全部",
   "sessions.filter.source_aria": "按会话来源筛选",
+  "sessions.filter.codex_all": "CODEX ALL",
+  "sessions.filter.codex_root_aria": "按 Codex 目录筛选",
   "sessions.filter.range_all": "全部时间",
   "sessions.filter.range_aria": "按日期范围筛选",
   "sessions.filter.range_7d": "7 天",

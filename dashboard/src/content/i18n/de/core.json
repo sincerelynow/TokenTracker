@@ -499,6 +499,8 @@
   "sessions.page.refresh": "Sitzungen aktualisieren",
   "sessions.filter.source_all": "Alle",
   "sessions.filter.source_aria": "Nach Sitzungsquelle filtern",
+  "sessions.filter.codex_all": "CODEX ALL",
+  "sessions.filter.codex_root_aria": "Nach Codex-Verzeichnis filtern",
   "sessions.filter.range_all": "Gesamt",
   "sessions.filter.range_aria": "Nach Zeitraum filtern",
   "sessions.filter.range_7d": "7 Tage",

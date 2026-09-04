@@ -502,6 +502,8 @@
   "sessions.page.refresh": "セッションを更新",
   "sessions.filter.source_all": "すべて",
   "sessions.filter.source_aria": "セッションのソースで絞り込む",
+  "sessions.filter.codex_all": "CODEX ALL",
+  "sessions.filter.codex_root_aria": "Codex ルートで絞り込む",
   "sessions.filter.range_all": "全期間",
   "sessions.filter.range_aria": "期間で絞り込む",
   "sessions.filter.range_7d": "7日間",

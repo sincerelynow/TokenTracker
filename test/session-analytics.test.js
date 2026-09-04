@@ -277,6 +277,55 @@ test("session analytics reuses unchanged file records during an incremental rebu
   assert.equal(rebuilt.find((row) => row.project_key === "project-b").turns, 2);
 });
 
+test("Codex root metadata invalidates sidecar cache and stays browser-only", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-session-root-cache-"));
+  const root = path.join(home, ".codex-custom");
+  const trackerDir = path.join(home, ".tokentracker", "tracker");
+  const sessionId = "44444444-4444-4444-8444-444444444444";
+  const sessionsDir = path.join(root, "sessions", "2026", "09", "04");
+  const configPath = path.join(trackerDir, "config.json");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.mkdirSync(trackerDir, { recursive: true });
+  const writeConfig = (label) => fs.writeFileSync(configPath, `${JSON.stringify({
+    codexHomes: [{ path: root, key: "codex-custom-11111111", label }],
+  })}\n`);
+  writeConfig("CODEX_OLD");
+  fs.writeFileSync(path.join(sessionsDir, `rollout-${sessionId}.jsonl`), `${[
+    { timestamp: "2026-09-04T01:00:00Z", type: "session_meta", payload: { id: sessionId, cwd: path.join(home, "workspace") } },
+    { timestamp: "2026-09-04T01:00:01Z", type: "turn_context", payload: { model: "gpt-5.6-sol" } },
+    { timestamp: "2026-09-04T01:00:02Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 5, output_tokens: 2 } } } },
+  ].map(JSON.stringify).join("\n")}\n`);
+
+  const first = await buildSessionAnalytics({ home, force: true });
+  assert.equal(listSessionsForBrowser(first).sessions[0].instance_label, "CODEX_OLD");
+
+  const sidecarPath = path.join(trackerDir, "session.queue.jsonl");
+  const metaPath = `${sidecarPath}.meta.json`;
+  const poisonedRows = fs.readFileSync(sidecarPath, "utf8").trim().split("\n").map(JSON.parse);
+  poisonedRows[0].instance_label = "STALE_V12";
+  fs.writeFileSync(sidecarPath, `${poisonedRows.map(JSON.stringify).join("\n")}\n`);
+  const oldMeta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  fs.writeFileSync(metaPath, `${JSON.stringify({ ...oldMeta, version: 12 })}\n`);
+  const rebuilt = await buildSessionAnalytics({ home });
+  assert.equal(listSessionsForBrowser(rebuilt).sessions[0].instance_label, "CODEX_OLD");
+
+  writeConfig("CODEX_NEW");
+  const relabeled = await buildSessionAnalytics({ home });
+  const browserRow = listSessionsForBrowser(relabeled).sessions[0];
+  assert.equal(browserRow.source, "codex");
+  assert.equal(browserRow.source_instance, "codex-custom-11111111");
+  assert.equal(browserRow.instance_label, "CODEX_NEW");
+  assert.equal("root_path" in browserRow, false);
+
+  const summary = summarizeSessions(relabeled);
+  assert.equal("source_instance" in summary.sessions[0], false);
+  assert.equal("instance_label" in summary.sessions[0], false);
+  const csv = sessionsToCsv(summary.sessions);
+  assert.equal(csv.includes("codex-custom-11111111"), false);
+  assert.equal(csv.includes("CODEX_NEW"), false);
+  assert.equal(csv.includes(root), false);
+});
+
 test("Claude session title uses the ai-title record, never the prompt body", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tt-session-title-"));
   const filePath = path.join(dir, "session.jsonl");

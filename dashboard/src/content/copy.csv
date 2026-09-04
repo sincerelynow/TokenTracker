@@ -1433,6 +1433,8 @@ sessions.page.subtitle,ui,SessionsPage,SessionsPage,subtitle,"Browse your local 
 sessions.page.refresh,ui,SessionsPage,SessionsPage,refresh,"Refresh sessions",,active
 sessions.filter.source_all,ui,SessionsPage,SessionsPage,filter_source_all,"All",,active
 sessions.filter.source_aria,ui,SessionsPage,SessionsPage,filter_source_aria,"Filter by session source",,active
+sessions.filter.codex_all,ui,SessionsPage,SessionsPage,filter_codex_all,"CODEX ALL",,active
+sessions.filter.codex_root_aria,ui,SessionsPage,SessionsPage,filter_codex_root_aria,"Filter by Codex root",,active
 sessions.filter.range_all,ui,SessionsPage,SessionsPage,filter_range_all,"All",,active
 sessions.filter.range_aria,ui,SessionsPage,SessionsPage,filter_range_aria,"Filter by date range",,active
 sessions.filter.range_7d,ui,SessionsPage,SessionsPage,filter_range_7d,"7d",,active

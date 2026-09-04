@@ -8,11 +8,49 @@ const test = require("node:test");
 
 const { parseCodexRolloutFile } = require("../src/lib/codex-rollout-parser");
 const {
+  buildSessionAnalytics,
   scanCodexSession,
   listSessionsForBrowser,
   providerRoots,
   summarizeSessions,
 } = require("../src/lib/session-analytics");
+
+async function writeCodexSession(root, bucket, sessionId, {
+  cwd = "/work/repo",
+  parentSessionId = null,
+  inputTokens = 5,
+  outputTokens = 2,
+} = {}) {
+  const dir = path.join(root, bucket, "2026", "09", "04");
+  const filePath = path.join(dir, `rollout-${sessionId}.jsonl`);
+  await fs.mkdir(dir, { recursive: true });
+  const rows = [
+    {
+      timestamp: "2026-09-04T00:00:00.000Z",
+      type: "session_meta",
+      payload: {
+        id: sessionId,
+        cwd,
+        ...(parentSessionId ? { forked_from_id: parentSessionId } : {}),
+      },
+    },
+    {
+      timestamp: "2026-09-04T00:00:01.000Z",
+      type: "turn_context",
+      payload: { model: "gpt-5.6-sol" },
+    },
+    {
+      timestamp: "2026-09-04T00:00:02.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: { last_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+      },
+    },
+  ];
+  await fs.writeFile(filePath, `${rows.map(JSON.stringify).join("\n")}\n`, "utf8");
+  return filePath;
+}
 
 function codexRow({
   id,
@@ -83,6 +121,58 @@ test("Codex session roots use the persisted multi-root configuration", async (t)
     `${JSON.stringify({ codexHomes: roots })}\n`,
   );
   assert.deepEqual(providerRoots(home, ".codex", {}, { homedir: () => home, probeWsl: false }), roots);
+});
+
+test("session browser retains ordered Codex root identity across active and archived sessions", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-session-root-identity-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const primary = path.join(home, ".codex");
+  const ipc = path.join(home, ".codex-ipc");
+  await fs.mkdir(path.join(home, ".tokentracker", "tracker"), { recursive: true });
+  await fs.writeFile(path.join(home, ".tokentracker", "tracker", "config.json"), `${JSON.stringify({
+    codexHomes: [
+      { path: primary, key: "codex-11111111", label: "CODEX" },
+      { path: ipc, key: "codex-ipc-22222222", label: "CODEX_IPC" },
+    ],
+  })}\n`);
+  const parentId = "11111111-1111-4111-8111-111111111111";
+  const archivedChildId = "22222222-2222-4222-8222-222222222222";
+  await writeCodexSession(primary, "sessions", parentId);
+  await writeCodexSession(ipc, "archived_sessions", archivedChildId, { parentSessionId: parentId });
+
+  const result = listSessionsForBrowser(await buildSessionAnalytics({ home, force: true }));
+  const parent = result.sessions.find((row) => row.session_id === parentId);
+  const child = result.sessions.find((row) => row.session_id === archivedChildId);
+  assert.equal(parent.source, "codex");
+  assert.equal(parent.source_instance, "codex-11111111");
+  assert.equal(parent.instance_label, "CODEX");
+  assert.equal(child.source, "codex");
+  assert.equal(child.source_instance, "codex-ipc-22222222");
+  assert.equal(child.instance_label, "CODEX_IPC");
+  assert.equal(child.parent_session_hash, parent.session_hash);
+});
+
+test("a Codex session duplicated across roots belongs to the first configured root", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-session-root-owner-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const first = path.join(home, ".codex-first");
+  const second = path.join(home, ".codex-second");
+  await fs.mkdir(path.join(home, ".tokentracker", "tracker"), { recursive: true });
+  await fs.writeFile(path.join(home, ".tokentracker", "tracker", "config.json"), `${JSON.stringify({
+    codexHomes: [
+      { path: first, key: "codex-first-11111111", label: "CODEX_FIRST" },
+      { path: second, key: "codex-second-22222222", label: "CODEX_SECOND" },
+    ],
+  })}\n`);
+  const sessionId = "33333333-3333-4333-8333-333333333333";
+  await writeCodexSession(first, "archived_sessions", sessionId);
+  await writeCodexSession(second, "sessions", sessionId);
+
+  const result = listSessionsForBrowser(await buildSessionAnalytics({ home, force: true }));
+  assert.equal(result.sessions.length, 1);
+  assert.equal(result.sessions[0].source_instance, "codex-first-11111111");
+  assert.equal(result.sessions[0].instance_label, "CODEX_FIRST");
+  assert.equal(result.sessions[0].total_tokens, 7);
 });
 
 test("custom CODEX_HOME rollouts load titles from the provider-root index", async () => {

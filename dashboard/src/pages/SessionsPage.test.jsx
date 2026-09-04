@@ -186,6 +186,110 @@ describe("SessionsPage", () => {
     expect(screen.queryByText("Debug local proxy")).not.toBeInTheDocument();
   });
 
+  it("filters Codex sessions by dynamically discovered root and composes with search", async () => {
+    const primary = {
+      ...response.sessions[1],
+      session_hash: "codex-primary",
+      title: "Primary release review",
+      source_instance: "codex-11111111",
+      instance_label: "CODEX",
+    };
+    const ipc = {
+      ...response.sessions[1],
+      session_hash: "codex-ipc",
+      session_id: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+      title: "IPC release review",
+      project_key: "ipc-project",
+      source_instance: "codex-ipc-22222222",
+      instance_label: "CODEX_IPC",
+    };
+    const legacy = {
+      ...response.sessions[1],
+      session_hash: "codex-legacy",
+      session_id: "cccccccc-dddd-4eee-8fff-000000000000",
+      title: "Legacy Codex review",
+    };
+    getSessions.mockResolvedValue({
+      ...response,
+      session_count: 5,
+      returned_count: 5,
+      sessions: [response.sessions[0], primary, ipc, legacy, response.sessions[2]],
+    });
+
+    render(<SessionsPage />);
+    await screen.findByText("Primary release review");
+    const sourceTabs = within(screen.getByRole("tablist", { name: "Filter by session source" }));
+    fireEvent.click(sourceTabs.getByRole("tab", { name: "Codex" }));
+
+    const rootTabs = within(screen.getByRole("tablist", { name: "Filter by Codex root" }));
+    expect(rootTabs.getByRole("tab", { name: "CODEX ALL" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Primary release review")).toBeInTheDocument();
+    expect(screen.getByText("IPC release review")).toBeInTheDocument();
+    expect(screen.getByText("Legacy Codex review")).toBeInTheDocument();
+    expect(screen.queryByText("Fix authentication flow")).not.toBeInTheDocument();
+
+    fireEvent.click(rootTabs.getByRole("tab", { name: "CODEX_IPC" }));
+    expect(screen.queryByText("Primary release review")).not.toBeInTheDocument();
+    expect(screen.getByText("IPC release review")).toBeInTheDocument();
+    expect(screen.queryByText("Legacy Codex review")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search sessions" }), {
+      target: { value: "missing" },
+    });
+    expect(screen.queryByText("IPC release review")).not.toBeInTheDocument();
+    expect(screen.getByText("0 of 5")).toBeInTheDocument();
+  });
+
+  it("hides the Codex root control for one instance and legacy rows", async () => {
+    getSessions.mockResolvedValue({
+      ...response,
+      session_count: 2,
+      returned_count: 2,
+      sessions: [
+        { ...response.sessions[1], source_instance: "codex-11111111", instance_label: "CODEX" },
+        { ...response.sessions[1], session_hash: "legacy-codex", title: "Legacy Codex row" },
+      ],
+    });
+
+    render(<SessionsPage />);
+    await screen.findByText("Legacy Codex row");
+    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
+    expect(screen.queryByRole("tablist", { name: "Filter by Codex root" })).not.toBeInTheDocument();
+    expect(screen.getByText("Review release")).toBeInTheDocument();
+    expect(screen.getByText("Legacy Codex row")).toBeInTheDocument();
+  });
+
+  it("returns to CODEX ALL when refresh removes the selected root", async () => {
+    const primary = {
+      ...response.sessions[1],
+      session_hash: "refresh-primary",
+      title: "Refresh primary",
+      source_instance: "codex-11111111",
+      instance_label: "CODEX",
+    };
+    const ipc = {
+      ...response.sessions[1],
+      session_hash: "refresh-ipc",
+      title: "Refresh IPC",
+      source_instance: "codex-ipc-22222222",
+      instance_label: "CODEX_IPC",
+    };
+    getSessions
+      .mockResolvedValueOnce({ ...response, session_count: 2, returned_count: 2, sessions: [primary, ipc] })
+      .mockResolvedValueOnce({ ...response, session_count: 1, returned_count: 1, sessions: [primary] });
+
+    render(<SessionsPage />);
+    await screen.findByText("Refresh primary");
+    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("tab", { name: "CODEX_IPC" }));
+    expect(screen.getByText("Refresh IPC")).toBeInTheDocument();
+    expect(screen.queryByText("Refresh primary")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh sessions" }));
+    await waitFor(() => expect(screen.getByText("Refresh primary")).toBeInTheDocument());
+    expect(screen.queryByRole("tablist", { name: "Filter by Codex root" })).not.toBeInTheDocument();
+  });
+
   it("folds direct and nested subagents under their root session", async () => {
     const root = makeThreadSession({
       session_hash: "root-hash",

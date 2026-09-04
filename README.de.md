@@ -72,6 +72,25 @@ tokentracker status --light    # Reine ASCII-Tabelle (CI / SSH, kein Spinner)
 tokentracker doctor       # Health Check
 ```
 
+### Aus dem Quellcode installieren
+
+`npm i -g tokentracker-cli@latest` installiert das neueste veroeffentlichte Paket aus der npm-Registry. Um stattdessen den Code aus einem lokalen Checkout zu installieren, einschliesslich nicht committeter Entwicklungsaenderungen, fuehre Folgendes aus:
+
+```bash
+git clone https://github.com/xiufengsun/TokenTracker.git
+cd TokenTracker
+npm ci
+npm --prefix dashboard ci
+npm run dashboard:build
+npm install -g .
+
+tokentracker --version
+tokentracker init --yes --no-open  # Einrichtung ohne GUI/per SSH
+tokentracker serve --no-open       # Lokales Dashboard starten
+```
+
+Die angezeigte Version stammt aus `package.json` im Checkout; lokale Codeaenderungen aendern diese Versionsnummer nicht. Wiederhole nach einem Update des Checkouts die Installation der Abhaengigkeiten, den Build und `npm install -g .`, um die globale CLI zu aktualisieren.
+
 ### 🍺 Homebrew (macOS)
 
 ```bash

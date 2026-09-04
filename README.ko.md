@@ -69,6 +69,25 @@ tokentracker status       # hook 상태 확인
 tokentracker doctor       # 헬스 체크
 ```
 
+### 소스에서 설치
+
+`npm i -g tokentracker-cli@latest`는 npm 레지스트리에 게시된 최신 정식 버전을 설치합니다. 커밋하지 않은 개발 변경 사항을 포함하여 로컬 소스 체크아웃의 코드를 설치하려면 다음을 실행하세요:
+
+```bash
+git clone https://github.com/xiufengsun/TokenTracker.git
+cd TokenTracker
+npm ci
+npm --prefix dashboard ci
+npm run dashboard:build
+npm install -g .
+
+tokentracker --version
+tokentracker init --yes --no-open  # 헤드리스/SSH 환경 초기화
+tokentracker serve --no-open       # 로컬 대시보드 시작
+```
+
+표시되는 버전은 체크아웃의 `package.json`에서 가져옵니다. 로컬 코드를 수정해도 버전 문자열은 자동으로 바뀌지 않습니다. 체크아웃을 업데이트한 뒤에는 의존성 설치, 빌드 및 `npm install -g .`를 다시 실행하여 전역 CLI를 갱신하세요.
+
 ### 🍺 Homebrew (macOS)
 
 `brew`를 선호한다면, 별도 tap 단계 없이 바로 설치 가능:

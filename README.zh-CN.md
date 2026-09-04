@@ -71,6 +71,25 @@ tokentracker status --light  # 纯 ASCII 表（CI / SSH 用，无 spinner）
 tokentracker doctor       # 健康检查
 ```
 
+### 从源码安装
+
+`npm i -g tokentracker-cli@latest` 安装的是 npm 公共仓库中最新发布的正式版本。若要安装本地源码目录中的代码（包括尚未提交的开发改动），请执行：
+
+```bash
+git clone https://github.com/xiufengsun/TokenTracker.git
+cd TokenTracker
+npm ci
+npm --prefix dashboard ci
+npm run dashboard:build
+npm install -g .
+
+tokentracker --version
+tokentracker init --yes --no-open  # 无界面/SSH 环境初始化
+tokentracker serve --no-open       # 启动本地 Dashboard
+```
+
+版本号取自当前源码目录的 `package.json`；修改本地代码不会自动改变版本号。源码更新后，需要重新执行依赖安装、Dashboard 构建和 `npm install -g .`，才能刷新全局 CLI。
+
 ### 🍺 Homebrew（macOS）
 
 用惯 `brew` 的话可以直接装，无需额外 `tap`：

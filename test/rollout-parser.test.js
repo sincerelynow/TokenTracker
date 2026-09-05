@@ -3541,6 +3541,72 @@ test("readZcodeDbMessages snapshots native model_usage DBs on UNC paths", async 
   }
 });
 
+test("readZcodeDbMessages preserves normalized legacy history before native model_usage begins", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-zcode-native-history-"));
+  try {
+    const dbPath = path.join(tmp, "db.sqlite");
+    const legacyBeforeNative = {
+      id: "legacy-before-native",
+      sessionID: "session-real",
+      role: "assistant",
+      providerID: "builtin:zai-start-plan",
+      modelID: "GLM-5.2",
+      time: { created: 1781514000000, completed: 1781514060000 },
+      tokens: { input: 70, output: 14, reasoning: 4, cache: { read: 20, write: 10 } },
+    };
+    const legacyCoveredByNative = {
+      ...legacyBeforeNative,
+      id: "legacy-covered-by-native",
+      time: { created: 1787105605912, completed: 1787105665912 },
+    };
+    const beforeJson = JSON.stringify(legacyBeforeNative).replace(/'/g, "''");
+    const coveredJson = JSON.stringify(legacyCoveredByNative).replace(/'/g, "''");
+    runSqliteWrite(dbPath, `
+      CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT NOT NULL);
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        time_created INTEGER NOT NULL,
+        time_updated INTEGER NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE TABLE model_usage (
+        id TEXT PRIMARY KEY,
+        logical_request_id TEXT NOT NULL,
+        attempt_index INTEGER NOT NULL DEFAULT 0,
+        session_id TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        model_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_input_tokens INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO session VALUES ('session-real', '/real/project');
+      INSERT INTO message VALUES
+        ('legacy-before-native', 'session-real', 1781514000000, 1781514060000, '${beforeJson}'),
+        ('legacy-covered-by-native', 'session-real', 1787105605912, 1787105665912, '${coveredJson}');
+      INSERT INTO model_usage VALUES
+        ('native', 'logical-native', 0, 'session-real', 'builtin:zai-start-plan', 'GLM-5.3',
+         'completed', 1787105605912, 101, 21, 6, 11, 31);
+    `);
+
+    const rows = readZcodeDbMessages(dbPath);
+    assert.deepEqual(rows.map((row) => row.id), ["legacy-before-native", "native"]);
+    assert.deepEqual(rows[0].data.tokens, {
+      input: 40,
+      output: 10,
+      reasoning: 4,
+      cache: { read: 20, write: 10 },
+    });
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("readZcodeDbMessages keeps Z.ai/BigModel + third-party rows, drops bundled sub-agent turns", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-zcode-db-"));
   try {
@@ -3578,6 +3644,7 @@ test("readZcodeDbMessages keeps Z.ai/BigModel + third-party rows, drops bundled 
     assert.deepEqual(models, ["GLM-5-Turbo", "GLM-5.2", "fugu-ultra", "mimo-v2.5-pro"]);
     // No bundled anthropic/openai/google sub-agent turn survives the filter.
     assert.ok(!rows.some((r) => /anthropic|openai|google/.test(r.data.providerID)));
+    assert.ok(rows.every((row) => row.data.tokens.input === 50));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -3621,7 +3688,7 @@ test("parseOpencodeDbIncremental aggregates ZCode GLM rows into source=zcode buc
     // Model is stored with the DB's original case ("GLM-5.2"); the pricing
     // matcher is case-insensitive so cost still resolves to the curated key.
     assert.equal(queued[0].model, "GLM-5.2");
-    assert.equal(queued[0].input_tokens, 10478);
+    assert.equal(queued[0].input_tokens, 3438);
     assert.equal(queued[0].output_tokens, 203);
     assert.equal(queued[0].cached_input_tokens, 7040);
 
@@ -6653,6 +6720,142 @@ test("parseCopilotIncremental repairs v2 Chat deduplication before upgrading the
   }
 });
 
+test("parseCopilotIncremental migrates v2 when a recovered request creates a new bucket", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-v2-new-bucket-"));
+  try {
+    const otelPath = path.join(tmp, "vscode-chat.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const first = makeCopilotChatLogRecord({
+      responseId: "v2-new-bucket-r1",
+      model: "gpt-4o-mini-2024-07-18",
+      inputTokens: 500,
+      outputTokens: 50,
+      cacheRead: 0,
+    });
+    const recovered = makeCopilotChatLogRecord({
+      responseId: "v2-new-bucket-r2",
+      model: "gpt-5.6-luna",
+      inputTokens: 800,
+      outputTokens: 90,
+      cacheRead: 0,
+    });
+    // v2 collapsed these two Chat LogRecords into the first request because
+    // they share a spanContext. v3 must recover the second model's bucket.
+    first.spanContext = { traceId: "v2-new-bucket-trace", spanId: "v2-new-bucket-span" };
+    recovered.spanContext = { traceId: "v2-new-bucket-trace", spanId: "v2-new-bucket-span" };
+    writeCopilotOtelFile(otelPath, [first, recovered]);
+    const stat = fssync.statSync(otelPath);
+    const firstModel = "gpt-4o-mini-2024-07-18";
+    const recoveredModel = "gpt-5.6-luna";
+    const hourStart = "2026-05-13T03:00:00.000Z";
+    const cursors = {
+      copilot: {
+        version: 2,
+        seenIds: ["v2-new-bucket-trace:v2-new-bucket-span"],
+        fileOffsets: {
+          [otelPath]: { size: stat.size, mtimeMs: stat.mtimeMs, ino: stat.ino },
+        },
+      },
+      hourly: {
+        version: 3,
+        buckets: {
+          [bucketKey("copilot", firstModel, hourStart)]: {
+            totals: {
+              input_tokens: 500,
+              cached_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+              output_tokens: 50,
+              reasoning_output_tokens: 0,
+              total_tokens: 550,
+              billable_total_tokens: 550,
+              conversation_count: 1,
+            },
+            queuedKey: null,
+          },
+        },
+        groupQueued: {},
+      },
+    };
+
+    const result = await parseCopilotIncremental({
+      otelPaths: [otelPath],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.eventsAggregated, 0, "migration should process the historical prefix");
+    assert.equal(cursors.copilot.version, 3, "migration should advance the cursor");
+
+    const recoveredBucket = cursors.hourly.buckets[
+      bucketKey("copilot", recoveredModel, hourStart)
+    ];
+    assert.equal(recoveredBucket.totals.input_tokens, 800);
+    assert.equal(recoveredBucket.totals.output_tokens, 90);
+    assert.equal(recoveredBucket.totals.total_tokens, 890);
+    assert.equal(recoveredBucket.totals.conversation_count, 1);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCopilotIncremental prunes deleted v2 files before processing new files", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-v2-deleted-file-"));
+  try {
+    const oldPath = path.join(tmp, "copilot-otel-old.jsonl");
+    const newPath = path.join(tmp, "copilot-otel-new.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const oldRecord = makeCopilotChatLogRecord({
+      responseId: "v2-deleted-old",
+      inputTokens: 400,
+      outputTokens: 40,
+      cacheRead: 0,
+    });
+    oldRecord.spanContext = { traceId: "v2-deleted-trace", spanId: "v2-deleted-span" };
+    writeCopilotOtelFile(oldPath, [oldRecord]);
+    const oldStat = fssync.statSync(oldPath);
+
+    writeCopilotOtelFile(newPath, [
+      makeCopilotChatLogRecord({
+        responseId: "v2-new-file",
+        model: "gpt-5.6-luna",
+        inputTokens: 700,
+        outputTokens: 80,
+        cacheRead: 0,
+      }),
+    ]);
+    await fs.rm(oldPath);
+
+    const cursors = {
+      copilot: {
+        version: 2,
+        seenIds: ["v2-deleted-trace:v2-deleted-span"],
+        fileOffsets: {
+          [oldPath]: { size: oldStat.size, mtimeMs: oldStat.mtimeMs, ino: oldStat.ino },
+        },
+      },
+    };
+    const result = await parseCopilotIncremental({
+      otelPaths: [newPath],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(result.eventsAggregated, 1, "the newly discovered file should be processed");
+    assert.equal(cursors.copilot.version, 3, "migration should advance past the deleted file");
+    assert.equal(cursors.copilot.fileOffsets[oldPath], undefined);
+    assert.equal(cursors.copilot.fileOffsets[newPath].size, fssync.statSync(newPath).size);
+
+    const [bucket] = (await readJsonLines(queuePath)).filter(
+      (entry) => entry.source === "copilot",
+    );
+    assert.equal(bucket.model, "gpt-5.6-luna");
+    assert.equal(bucket.input_tokens, 700);
+    assert.equal(bucket.output_tokens, 80);
+    assert.equal(bucket.total_tokens, 780);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseCopilotIncremental reads short cache_creation + reasoning_tokens keys (Chat extension)", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-copilot-"));
   try {
@@ -8827,7 +9030,9 @@ test("parseKiroCliIncremental parses Kiro CLI 2.13 event sessions with per-turn 
     assert.equal(firstCredits.session_count, 1);
     assert.equal(firstCredits.file_count, 1);
     assert.equal(firstCredits.latest_at, "2026-07-22T03:25:03.000Z");
-    assert.equal((await fs.stat(creditsPath)).mode & 0o777, 0o600);
+    if (process.platform !== "win32") {
+      assert.equal((await fs.stat(creditsPath)).mode & 0o777, 0o600);
+    }
 
     const second = await rolloutModule.parseKiroCliIncremental({
       cursors,
@@ -11671,6 +11876,7 @@ test("parseAntigravityIncremental bills only newly added context per planner cal
       queued[0].total_tokens,
       queued[0].input_tokens + queued[0].output_tokens + queued[0].reasoning_output_tokens,
     );
+    assert.equal(queued[0].billable_total_tokens, queued[0].total_tokens);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

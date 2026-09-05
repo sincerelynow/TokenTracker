@@ -183,6 +183,10 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   //    matcher requires the user-supplied model name to CONTAIN the LiteLLM
   //    key, so the bare `glm-5.1` / `glm-4.6` strings reported by Claude
   //    Code-compatible GLM endpoints never match. Curate them here. ──
+  // GLM-5.3: flagship keeps the 5.2 list rate; Flash is a distinct cheap SKU
+  // (LiteLLM `zai/glm-5.3-flash`: $0.15/$0.50/$0.03 per MTok in/out/cache-read).
+  "glm-5.3": { input: 1.4, output: 4.4, cache_read: 0.26 },
+  "glm-5.3-flash": { input: 0.15, output: 0.5, cache_read: 0.03 },
   "glm-5.2": { input: 1.4, output: 4.4, cache_read: 0.26 },
   "glm-5.1": { input: 1.4, output: 4.4, cache_read: 0.26 },
   "glm-5": { input: 1.0, output: 3.2, cache_read: 0.2 },
@@ -344,6 +348,8 @@ function getModelPricing(model: string) {
   if (lower.includes("glm-4.7-flash")) return MODEL_PRICING["glm-4.7-flash"];
   if (lower.includes("glm-4.7")) return MODEL_PRICING["glm-4.7"];
   if (lower.includes("glm-4.6")) return MODEL_PRICING["glm-4.6"];
+  if (lower.includes("glm-5.3-flash")) return MODEL_PRICING["glm-5.3-flash"];
+  if (lower.includes("glm-5.3")) return MODEL_PRICING["glm-5.3"];
   if (lower.includes("glm-5-turbo")) return MODEL_PRICING["glm-5-turbo"];
   if (lower.includes("glm-5.2")) return MODEL_PRICING["glm-5.2"];
   if (lower.includes("glm-5.1")) return MODEL_PRICING["glm-5.1"];
@@ -590,7 +596,7 @@ export default async function (req: Request): Promise<Response> {
   const bySource = new Map<string, SourceAgg>();
   for (const row of filtered) {
     const src = row.source || "unknown";
-    const mdl = row.model || "unknown";
+    const mdl = String(row.model || "unknown").trim() || "unknown";
     let sa = bySource.get(src);
     if (!sa) {
       sa = { source: src, totals: newTotals(), models: new Map() };
@@ -617,10 +623,15 @@ export default async function (req: Request): Promise<Response> {
     ma.totals.cached_input_tokens += Number(row.cached_input_tokens) || 0;
     ma.totals.cache_creation_input_tokens += Number(row.cache_creation_input_tokens) || 0;
     ma.totals.reasoning_output_tokens += Number(row.reasoning_output_tokens) || 0;
-    const modelForPricing =
-      src === "workbuddy" && mdl.toLowerCase() === "auto" ? "hy3-preview-agent" : mdl;
+    const unslothUnpriced = src === "unsloth" && /^(local|unpriced)\//i.test(mdl);
+    const modelForPricing = unslothUnpriced
+      ? "__tokentracker_unpriced_unsloth_model__"
+      : src === "workbuddy" && mdl.toLowerCase() === "auto"
+        ? "hy3-preview-agent"
+        : mdl;
     const p = getRowPricing({ ...row, model: modelForPricing });
-    const subscriptionBacked = src === "pi-github-copilot" || src === "pi-copilot";
+    const subscriptionBacked =
+      src === "pi-github-copilot" || src === "pi-copilot" || src === "lmstudio";
     const reasoningIncludedInOutput = src === "codex" || src.startsWith("codex-root:") || src === "every-code";
     const reportedCost = Number(row.total_cost_usd);
     ma.totalCostUsd += subscriptionBacked

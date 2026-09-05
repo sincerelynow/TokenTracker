@@ -112,6 +112,16 @@ async function authorizeRefresh(req: Request): Promise<RefreshAuthorization | nu
 
 type Period = "week" | "month" | "total";
 const ALL_PERIODS: Period[] = ["week", "month", "total"];
+const TOTAL_USER_SHARDS = [
+  { from: "00000000-0000-0000-0000-000000000000", to: "20000000-0000-0000-0000-000000000000" },
+  { from: "20000000-0000-0000-0000-000000000000", to: "40000000-0000-0000-0000-000000000000" },
+  { from: "40000000-0000-0000-0000-000000000000", to: "60000000-0000-0000-0000-000000000000" },
+  { from: "60000000-0000-0000-0000-000000000000", to: "80000000-0000-0000-0000-000000000000" },
+  { from: "80000000-0000-0000-0000-000000000000", to: "a0000000-0000-0000-0000-000000000000" },
+  { from: "a0000000-0000-0000-0000-000000000000", to: "c0000000-0000-0000-0000-000000000000" },
+  { from: "c0000000-0000-0000-0000-000000000000", to: "e0000000-0000-0000-0000-000000000000" },
+  { from: "e0000000-0000-0000-0000-000000000000", to: null },
+] as const;
 const RAW_BLOCKED_LEADERBOARD_USER_IDS = Deno.env.get("LEADERBOARD_BLOCKED_USER_IDS");
 /**
  * Whether the block list was configured at all. An unset secret and a
@@ -212,6 +222,10 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   //    matcher requires the user-supplied model name to CONTAIN the LiteLLM
   //    key, so the bare `glm-5.1` / `glm-4.6` strings reported by Claude
   //    Code-compatible GLM endpoints never match. Curate them here. ──
+  // GLM-5.3: flagship keeps the 5.2 list rate; Flash is a distinct cheap SKU
+  // (LiteLLM `zai/glm-5.3-flash`: $0.15/$0.50/$0.03 per MTok in/out/cache-read).
+  "glm-5.3": { input: 1.4, output: 4.4, cache_read: 0.26 },
+  "glm-5.3-flash": { input: 0.15, output: 0.5, cache_read: 0.03 },
   "glm-5.2": { input: 1.4, output: 4.4, cache_read: 0.26 },
   "glm-5.1": { input: 1.4, output: 4.4, cache_read: 0.26 },
   "glm-5": { input: 1.0, output: 3.2, cache_read: 0.2 },
@@ -373,6 +387,8 @@ function getModelPricing(model: string) {
   if (lower.includes("glm-4.7-flash")) return MODEL_PRICING["glm-4.7-flash"];
   if (lower.includes("glm-4.7")) return MODEL_PRICING["glm-4.7"];
   if (lower.includes("glm-4.6")) return MODEL_PRICING["glm-4.6"];
+  if (lower.includes("glm-5.3-flash")) return MODEL_PRICING["glm-5.3-flash"];
+  if (lower.includes("glm-5.3")) return MODEL_PRICING["glm-5.3"];
   if (lower.includes("glm-5-turbo")) return MODEL_PRICING["glm-5-turbo"];
   if (lower.includes("glm-5.2")) return MODEL_PRICING["glm-5.2"];
   if (lower.includes("glm-5.1")) return MODEL_PRICING["glm-5.1"];
@@ -418,6 +434,9 @@ function getRowPricing(row: { model?: string; hour_start?: string; pricing_tier?
 }
 
 function computeRowCost(row: HourlyRow): number {
+  // LM Studio developer-server and LM Link traffic is local inference. Its
+  // logs do not represent Bionic Secure Cloud billing.
+  if (row.source === "lmstudio") return 0;
   // Pi's GitHub Copilot provider is subscription-backed. Keep its token
   // counts, but do not reprice the recorded Claude model as Anthropic API use.
   if (row.source === "pi-github-copilot" || row.source === "pi-copilot") return 0;
@@ -430,10 +449,14 @@ function computeRowCost(row: HourlyRow): number {
   // WorkBuddy's auto-router logs model="auto"; price it as its default Hunyuan
   // model (hy3-preview-agent) so it isn't billed as Cursor's composer-1. Mirrors
   // normalizeWorkbuddyModel in src/lib/pricing/matcher.js.
-  const modelForPricing =
-    row.source === "workbuddy" && (row.model || "").toLowerCase() === "auto"
+  const rawModel = String(row.model || "").trim();
+  const unslothUnpriced =
+    row.source === "unsloth" && /^(local|unpriced)\//i.test(rawModel);
+  const modelForPricing = unslothUnpriced
+    ? "__tokentracker_unpriced_unsloth_model__"
+    : row.source === "workbuddy" && rawModel.toLowerCase() === "auto"
       ? "hy3-preview-agent"
-      : row.model;
+      : rawModel;
   const p = getRowPricing({ ...row, model: modelForPricing });
   // For Codex-family rollouts, `output_tokens` already includes any reasoning
   // tokens (OpenAI API convention), so `reasoning_output_tokens * output_rate`
@@ -912,10 +935,42 @@ export default async function (req: Request): Promise<Response> {
     }
 
     const __t0 = Date.now();
-    const { data: groupedData, error: rpcErr } = await client.database.rpc(
-      "leaderboard_usage_grouped",
-      { p_from: rangeStart, p_to: rangeEnd },
-    );
+    let groupedData: unknown;
+    let rpcErr: { message: string } | null = null;
+    if (period === "total") {
+      // A single all-time RPC response eventually exceeded the database
+      // client's fixed 10s transport budget even after the historical scan was
+      // replaced by a compact rollup. Eight disjoint UUID ranges keep every
+      // response bounded while retaining model/pricing-tier rows for the one
+      // canonical TypeScript pricing implementation below.
+      const totalRows: unknown[] = [];
+      for (let shardIndex = 0; shardIndex < TOTAL_USER_SHARDS.length; shardIndex += 2) {
+        const shardBatch = await Promise.all(
+          TOTAL_USER_SHARDS.slice(shardIndex, shardIndex + 2).map(({ from, to }) =>
+            client.database.rpc(
+              "leaderboard_usage_grouped_total_shard",
+              { p_to: rangeEnd, p_user_from: from, p_user_to: to },
+            )
+          ),
+        );
+        const failedShard = shardBatch.find((result) => result.error);
+        if (failedShard?.error) {
+          rpcErr = failedShard.error;
+          break;
+        }
+        for (const result of shardBatch) {
+          if (Array.isArray(result.data)) totalRows.push(...result.data);
+        }
+      }
+      groupedData = rpcErr ? null : totalRows;
+    } else {
+      const result = await client.database.rpc(
+        "leaderboard_usage_grouped",
+        { p_from: rangeStart, p_to: rangeEnd },
+      );
+      groupedData = result.data;
+      rpcErr = result.error;
+    }
     const __tAfterRpc = Date.now();
     if (rpcErr) {
       logRefreshEvent({
@@ -929,7 +984,7 @@ export default async function (req: Request): Promise<Response> {
         error: rpcErr.message,
         duration_ms: Date.now() - periodStartedAt,
       });
-      return json({ error: rpcErr.message }, 500);
+      return json({ error: rpcErr.message, stage: "rpc_aggregate" }, 500);
     }
     const grouped = (Array.isArray(groupedData) ? groupedData : []) as HourlyRow[];
     const scannedRows = grouped.length; // pre-aggregated groups (not raw rows)

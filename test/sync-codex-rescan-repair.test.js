@@ -107,7 +107,10 @@ async function withTempSyncEnv(fn) {
     process.env.CODE_HOME = path.join(home, ".code");
     process.env.GEMINI_HOME = path.join(home, ".gemini");
     process.env.OPENCODE_HOME = path.join(home, ".opencode");
-    process.env.TOKENTRACKER_DEVICE_TOKEN = "test-device-token";
+    // This suite verifies local repair state, not cloud ingestion. Keeping a
+    // fake token here makes cmdSync contact the real default backend and turns
+    // an isolated test into a network-dependent 401 on developer machines.
+    delete process.env.TOKENTRACKER_DEVICE_TOKEN;
     process.env.TOKENTRACKER_AUTO_RETRY_NO_SPAWN = "1";
     delete process.env.DSH_HOME;
     delete process.env.TOKENTRACKER_DSH_HOME;

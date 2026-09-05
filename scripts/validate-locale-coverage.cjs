@@ -27,6 +27,7 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^leaderboard[.]community[.]modal[.]global_spend_detail$/,
   /^leaderboard[.]community[.]modal[.]platform[.]/,
   /^dashboard[.]install[.]cmd[.]/,
+  /^(?:usage[.]overview|sessions[.]filter)[.]codex_all$/,
   /^settings[.]menubar[.]iconStyle[.](?:clawd|bot)$/,
   /^settings[.]menubar[.]updates[.]footerCore$/,
   /^limits[.]provider[.]/,

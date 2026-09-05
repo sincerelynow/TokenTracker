@@ -475,6 +475,7 @@ test("Context local-day boundaries are exact in Asia/Shanghai and America/Los_An
 
 test("Context honors custom CODEX_HOME archives and unbounded total scans every rollout", async () => {
   const customHome = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-custom-home-"));
+  const restoreHome = withHome(customHome);
   const previous = process.env.CODEX_HOME;
   try {
     const sessions = path.join(customHome, "sessions");
@@ -539,6 +540,7 @@ test("Context honors custom CODEX_HOME archives and unbounded total scans every 
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previous;
+    restoreHome();
     await fs.rm(customHome, { recursive: true, force: true });
   }
 });
@@ -1406,6 +1408,7 @@ test("Context abandons an incremental parse when appended token timestamps move 
 
 test("Context de-duplicates one session while it overlaps live and archived roots", async () => {
   const customHome = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-overlap-"));
+  const restoreHome = withHome(customHome);
   const previous = process.env.CODEX_HOME;
   try {
     const sessionId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -1451,6 +1454,7 @@ test("Context de-duplicates one session while it overlaps live and archived root
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = previous;
+    restoreHome();
     await fs.rm(customHome, { recursive: true, force: true });
   }
 });
@@ -1463,6 +1467,7 @@ test("Context merges split and suffix-only live/archive fragments by event time"
   for (const scenario of scenarios) {
     await t.test(scenario.name, async () => {
       const customHome = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codex-context-fragments-"));
+      const restoreHome = withHome(customHome);
       const previous = process.env.CODEX_HOME;
       try {
         const sessionId = "11111111-2222-3333-4444-555555555555";
@@ -1521,6 +1526,7 @@ test("Context merges split and suffix-only live/archive fragments by event time"
       } finally {
         if (previous === undefined) delete process.env.CODEX_HOME;
         else process.env.CODEX_HOME = previous;
+        restoreHome();
         await fs.rm(customHome, { recursive: true, force: true });
       }
     });

@@ -263,6 +263,7 @@ async function cmdServe(argv) {
 
 function startBackgroundSync({
   appShell = process.env.TOKENTRACKER_APP_SHELL,
+  nativeSyncOwner = process.env.TOKENTRACKER_NATIVE_SYNC_OWNER,
   intervalMs,
   runSync,
   setIntervalFn = setInterval,
@@ -272,6 +273,13 @@ function startBackgroundSync({
   const normalizedShell = String(appShell || "").trim().toLowerCase();
   if (normalizedShell === "macos" || normalizedShell === "linux") return null;
   if (normalizedShell && normalizedShell !== "windows") return null;
+  // The Windows tray host owns its five-minute background sync timer and
+  // receives completion events for the UI. Running this server-side fallback
+  // as well creates two independent sync producers that contend on sync.lock.
+  if (
+    normalizedShell === "windows" &&
+    String(nativeSyncOwner || "").trim().toLowerCase() === "windows-host"
+  ) return null;
   const resolvedIntervalMs = intervalMs || (
     normalizedShell === "windows"
       ? WINDOWS_BACKGROUND_SYNC_INTERVAL_MS

@@ -100,3 +100,16 @@ test("ordinary CLI serve schedules all local sources every five minutes", async 
   assert.equal(runSync.mock.calls[0].arguments[1].env.TOKENTRACKER_WSL_MODE, undefined);
   controller.stop();
 });
+
+test("Windows host-owned server skips the duplicate fallback timer", () => {
+  const setIntervalFn = test.mock.fn();
+  assert.equal(
+    startBackgroundSync({
+      appShell: "windows",
+      nativeSyncOwner: "windows-host",
+      setIntervalFn,
+    }),
+    null,
+  );
+  assert.equal(setIntervalFn.mock.callCount(), 0);
+});

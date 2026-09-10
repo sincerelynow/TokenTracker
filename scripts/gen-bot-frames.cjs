@@ -15,9 +15,9 @@
  * keep animating stale frames. `npm run gen:bot-frames`.
  */
 
-const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const { buildSync } = require("esbuild");
 
 const ROOT = path.resolve(__dirname, "..");
 const OUT = path.join(ROOT, "TokenTrackerBar", "TokenTrackerBar", "BotFrames.json");
@@ -56,11 +56,14 @@ function loadEngine() {
       `export * from ${modulePath("dashboard/src/lib/bot-appearance.js")}`,
     ].join("\n"),
   );
-  execFileSync(
-    process.execPath,
-    [require.resolve("esbuild/bin/esbuild"), entry, "--bundle", "--platform=node", "--format=cjs", "--log-level=warning", `--outfile=${bundle}`],
-    { stdio: "inherit" },
-  );
+  buildSync({
+    entryPoints: [entry],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    logLevel: "warning",
+    outfile: bundle,
+  });
   const loaded = require(bundle);
   fs.rmSync(entry, { force: true });
   fs.rmSync(bundle, { force: true });

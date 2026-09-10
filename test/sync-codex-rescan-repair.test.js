@@ -10,6 +10,7 @@ const {
   CODEX_RESCAN_DEDUP_REPAIR_KEY,
   CODEX_ROOT_ATTRIBUTION_REPAIR_KEY,
 } = require("../src/commands/sync");
+const { isCodexSource } = require("../src/lib/codex-source");
 
 async function makeTempHome() {
   return await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-codexrepair-"));
@@ -151,7 +152,7 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
       }));
       const modelTotals = {};
       for (const row of latest.values()) {
-        if (row.source !== "codex") continue;
+        if (!isCodexSource(row.source)) continue;
         modelTotals[row.model] = (modelTotals[row.model] || 0) + row.total_tokens;
       }
       assert.deepEqual(modelTotals, { "gpt-5.6-sol": count * 100, "gpt-5.6-terra": count * 150 });

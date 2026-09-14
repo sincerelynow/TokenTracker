@@ -6,7 +6,7 @@
 
 ### 跨所有 CLI，看清你到底在 AI 上花了多少钱
 
-自动采集 **36 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
+自动采集 **38 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -50,7 +50,7 @@ npx tokentracker-cli
 **30 秒能看到什么：**
 - 📊 本地 Dashboard（`localhost:7680`）—— 用量趋势、模型明细、成本分析
 - 🔌 自动识别并挂接你电脑上所有已安装的 AI 工具
-- 🏠 100% 本地运行 —— 无账号、无 API Key、无网络请求（排行榜是可选的）
+- 🏠 本地优先 —— 直接在本地机器解析日志，无需账号或 API Key
 - 🧩 *可选：* Skills 面板——浏览 250+ 公开 skill，并在 Claude · Codex · Grok · Antigravity · Gemini · OpenCode · Hermes 之间同步
 
 > **想要原生桌面 App？**
@@ -109,21 +109,21 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ## ✨ 特性
 
-- 🔌 **开箱即用支持 36 款 AI 工具** —— Claude Code、Codex CLI、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Dots、Prime Agent、Craft Agents、Reasonix、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、DeepSeek Harness、TRAE Work CN、LM Studio、Unsloth Studio
-- 🏠 **100% 本地** —— Token 数据绝不离开你的机器。无账号、无 API Key
+- 🔌 **开箱即用支持 38 款 AI 工具** —— Claude Code、Codex CLI、AStudio、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、pi、Dots、Prime Agent、Craft Agents、Reasonix、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、DeepSeek Harness、TRAE Work CN、LM Studio、Unsloth Studio、Devin CLI
+- 🏠 **本地优先** —— 跑在本地。直接在本地机器解析日志，无需账号或 API Key。
 - 🚀 **启动零改动** —— 首次运行不会修改 AI 工具配置；可在 Dashboard 手动管理可选集成
 - 🔄 **定时统计** —— CLI `serve` 每五分钟刷新全部本地来源，也可在设置 → 集成中点击“立即统计”
 - 📁 **多个 Codex 目录** —— 可在设置 → 集成中配置多个 Codex home；保存后的列表优先于 `CODEX_HOME`，移除目录只停止后续扫描，不删除历史统计
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
 - 🖥️ **原生桌面 App** —— macOS 菜单栏（含桌面小组件）与 Windows 系统托盘，各自内嵌服务 + 原生 WebView Dashboard
 - 🎨 **4 种桌面小组件** —— 用量 / 热力图 / 热门模型 / 使用限额 直接钉桌面
-- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN / Command Code 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
+- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN / Command Code / Ark Coding Plan / Ark Agent Plan / Devin 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
 - 🟢 **服务状态页** —— 直接汇总 8 家 provider 官方状态页的实时运行与事故状态
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
-- 🔄 **跨设备账户视图** —— 开启云同步后，Dashboard 会把你在每台机器（笔记本 + 台式机 + 服务器）上的用量合并成一个视图——总量、趋势、热力图、模型明细全部跨设备聚合（可选，需登录；默认的纯本地体验依然即时、离线）
+- 🔄 **跨设备账户视图** —— 开启云同步后，Dashboard 会把你在每台机器（笔记本 + 台式机 + 服务器）上的用量合并成一个视图——总量、趋势、热力图、模型明细全部跨设备聚合（可选，需登录）
 - 🧩 **可选 Skills 面板** —— 浏览 250+ 公开 skill（来自 `anthropics/skills`、`ComposioHQ/awesome-claude-skills`、`skills.sh` 以及你自己添加的任何 GitHub 仓库），在 Claude / Codex / Grok / Antigravity / Gemini / OpenCode / Hermes 之间同步，目标 Agent 文字可见、可单独管理、一键撤销
-- 🔒 **隐私优先** —— 只记录 token 数量与时间戳。**绝不**收集 prompt、回复、文件内容
+- 🔒 **隐私优先** —— 仅记录本地用量指标（token 数量、时间戳与模型名称）。Prompt、模型回复和代码绝不离开你的机器。
 
 ---
 
@@ -165,7 +165,7 @@ brew install xiufengsun/tokentracker/tokentracker
 <tr>
 <td colspan="2">
 
-**Skills 管理器** —— 浏览 250+ 公开 skill（GitHub 仓库 & `skills.sh`），一次安装，同步到 Claude / Codex / Grok / Antigravity / Gemini / OpenCode / Hermes。每个 Agent 单独开关，一键撤销，再也不用手动复制文件夹。
+**Skills 管理器** —— 浏览 250+ 公开 skill（GitHub 仓库 & `skills.sh`），一次安装，同步到 Claude / Codex / AStudio / Grok / Antigravity / Gemini / OpenCode / Hermes。每个 Agent 单独开关，一键撤销，再也不用手动复制文件夹。
 
 <img src="https://raw.githubusercontent.com/xiufengsun/tokentracker/main/docs/screenshots/skills.png" alt="Skills Manager" />
 
@@ -190,6 +190,7 @@ brew install xiufengsun/tokentracker/tokentracker
 |---|---|---|
 | **Claude Code** | 手动 | 写入 `settings.json` 的 SessionEnd hook |
 | **Codex CLI** | 手动 | 写入 `config.toml` 的 TOML notify hook |
+| **AStudio** | 手动 | 写入 `config.toml` 的 TOML notify hook |
 | **Cursor** | ✅ 自动 | API + SQLite 中的 auth token |
 | **Kiro** | ✅ 自动 | SQLite + JSONL 混合读取 |
 | **Gemini CLI** | 手动 | SessionEnd hook |
@@ -222,15 +223,16 @@ brew install xiufengsun/tokentracker/tokentracker
 | **LM Studio** | ✅ 自动 | 被动递归读取 `~/.lmstudio/server-logs/**/*.log`；只读取 Chat Completions 和 Responses API 最终响应中的 ID、模型、时间戳与标量 `usage` 计数，并按响应 ID 去重，不保留提示词或回复正文。该数据源覆盖本地推理与 LM Link（API 边际成本为 $0），不包含 Bionic Secure Cloud 账单。 |
 | **Unsloth Studio** | ✅ 自动 | 被动读取 `$UNSLOTH_STUDIO_HOME/studio.db`（默认 `~/.unsloth/studio/studio.db`）；只投影标量 `contextUsage` 元数据和不含内容的 `api_usage_events`。不会读取提示词、回复、附件、API subject、凭据或训练指标；本地路由成本为 $0，已知付费 provider 路由按实际响应模型估算 token 成本。 |
 | **AnythingLLM Desktop** | ✅ 自动 | 被动 SQLite 读取（`anythingllm-desktop/storage/anythingllm.db`；只读取每条消息的 token 指标，不读取 prompt 或回复） |
+| **Devin CLI** (Cognition) | ✅ 自动 | 被动 SQLite 读取（`$XDG_DATA_HOME/devin/cli/sessions.db`，默认 `~/.local/share/devin/cli/sessions.db`；按 `request_id` 对每次请求的用量指标去重——replay/fork/compaction 副本不会重复计数——使用记录的 generation model，不读取 prompt、回复或 `cogs_json`）。Devin 模型（`swe-2`、`swe-2-high`、`compactor`）当前没有定价数据，token 数照常统计但不计入美元估算——显示 $0 并不代表免费。没有已知的原生 Windows 数据目录；WSL 安装通过 `\\wsl$` 读取。 |
 | **Claude Science** | ✅ 自动 | 被动 SQLite 读取（`~/.claude-science/operon-cli.db`；只读取 `frames` 表的 token 计数，不读取 prompt、产物或研究内容）。没有原生 Windows 版——Windows 上该应用运行在 WSL 内，从 WSL 中读取。 |
 | **DeepSeek Harness** | ✅ 自动 | 被动读取会话日志（`~/.dsh/sessions/**/session.jsonl[.zstd]`；解析会话头部与 assistant 事件，支持多帧 zstd 解压） |
 | **TRAE Work CN** | ✅ 自动 | **需要显式开启：设置 `TOKENTRACKER_TRAE_CN_USAGE=1`。** 读取用量会把本地保存的登录授权发送到 TRAE 的内部 API，因此在你开启之前不会发出任何请求。开启后：仅在存在本地 TRAE Work CN 登录授权的可执行非后台同步期间，读取 macOS / Windows 本地登录应用的 session-token 用量；内部 API 可能变化 |
 
 > **如何管理插件 / Hook？** 打开本地 Dashboard 的**设置 → 集成**。启动和初始化不会改动任何 AI 工具配置：
-> - **基于 hook 的工具**（Claude Code、Codex、Gemini、Every Code、**CodeBuddy**、**WorkBuddy**、**Grok Build**）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
+> - **基于 hook 的工具**（Claude Code、Codex、AStudio、Gemini、Every Code、**CodeBuddy**、**WorkBuddy**、**Grok Build**）—— 我们把 SessionEnd hook 或 TOML notify 条目写入它们自己的配置文件
 > - **基于插件的工具**（OpenCode、**OpenClaw**）—— 插件随 npm 包一起分发。OpenClaw 的 session plugin 位于 `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/`；TokenTracker 会通过 OpenClaw 自己的 CLI 挂接并启用它，然后写入 `hooks.allowConversationAccess=true`，让 OpenClaw 放行触发同步的会话结束事件。无需下载、无需拖拽
 > - **oh-my-pi** —— 被动会话扫描始终是计费/token 的事实来源（`~/.omp/agent/sessions/**/*.jsonl`）。可从 Dashboard 安装托管的 notify 扩展，以便回合结束后近实时触发同步；同名用户自写扩展绝不会被覆盖或删除。
-> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**pi**、**Craft Agents**、**Reasonix**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**ZCode**、**Qoder**、**LM Studio**、**Unsloth Studio**、**AnythingLLM Desktop**、**Claude Science**、**DeepSeek Harness**) —— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）。Copilot App / CLI 的用量按请求读取 `~/.copilot/session-store.db`；`data.db` 只提供一次旧数据迁移基线，并在 store 成为主源后保持仅观察，Chat 扩展和旧版 CLI 继续使用 OTEL。TokenTracker 会协调这些数据源，使重叠请求只统计一次。迁移前无法无损拆分模型的 App/CLI 混合历史会保留为 `github-copilot-legacy` 聚合量，而不会猜测请求模型
+> - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**pi**、**Craft Agents**、**Reasonix**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**ZCode**、**Qoder**、**LM Studio**、**Unsloth Studio**、**AnythingLLM Desktop**、**Devin CLI**、**Claude Science**、**DeepSeek Harness**) —— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）。Copilot App / CLI 的用量按请求读取 `~/.copilot/session-store.db`；`data.db` 只提供一次旧数据迁移基线，并在 store 成为主源后保持仅观察，Chat 扩展和旧版 CLI 继续使用 OTEL。TokenTracker 会协调这些数据源，使重叠请求只统计一次。迁移前无法无损拆分模型的 App/CLI 混合历史会保留为 `github-copilot-legacy` 聚合量，而不会猜测请求模型
 > - **Grok Build 估算说明** —— Grok 当前本地遥测提供 `updates.jsonl` 里的累计 `totalTokens`，但还没有稳定的输入/输出/cache 拆分；`signals.json` 仍作为 `contextTokensUsed` 快照兜底。所以在 Grok 提供按调用粒度的用量明细之前，TokenTracker 对 Grok 成本仍是估算值
 >
 > 任何时候都可以用 `tokentracker status` 查看每个集成的状态。如果显示 `skipped`，`detail` 列会解释原因（例如某工具 CLI 不在 `PATH` 上、config 不可读等）。
@@ -241,15 +243,21 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ---
 
-## 🆚 为什么选 TokenTracker？
+## 🆚 为什么选 TokenTracker？ <a id="ccusage-alternative"></a>
 
-|                          | **TokenTracker** | ccusage     | Cursor 自带统计 |
-|--------------------------|:---:|:---:|:---:|
-| **支持的 AI 工具数**     | **36**           | 1（Claude）  | 1（Cursor）   |
-| **本地优先，无需账号**   | ✅               | ✅           | ❌            |
-| **原生桌面 App**         | ✅ macOS + Windows | ❌          | ❌            |
-| **桌面小组件**           | ✅ 4 个小组件    | ❌           | ❌            |
-| **限额追踪**             | ✅ 14 家 provider | ❌           | 只支持 Cursor |
+> **想要带桌面小组件和可视化界面的用量追踪体验？** TokenTracker 将面向众多 AI 编码工具的本地优先解析，与原生桌面 App、桌面小组件、多 provider 限额监控以及可选的云同步结合在一起。
+
+| 功能维度 | **[TokenTracker](https://github.com/xiufengsun/TokenTracker)** | **[ccusage](https://github.com/ccusage/ccusage)** | **[Tokscale](https://github.com/junhoyeo/tokscale)** |
+|---|:---:|:---:|:---:|
+| **支持的 AI 工具数** | **38** | 多 Agent / 工具支持 | 多 Agent / 工具支持 |
+| **主要交互方式** | 原生桌面 App 与 Web Dashboard | 终端命令行（CLI） | 终端 TUI 与 CLI |
+| **本地优先分析** | ✅ | ✅ | ✅ |
+| **原生桌面 App** | ✅ macOS、Windows、Linux | ❌ | ❌ |
+| **桌面小组件** | ✅ 4 个小组件 | ❌ | ❌ |
+| **限额追踪** | ✅ 17 家 provider | 较少（Claude 周期/用量） | 覆盖多个 provider |
+| **终端数据分析** | 基础 CLI（`status`、`--json`） | 完善的 CLI 报表能力 | 丰富的交互式 TUI 与 CLI |
+| **JSON 导出** | ✅ | ✅ | ✅ |
+| **公开排行榜** | 可选（需主动登录参与） | ❌ | 可选（`submit`） |
 
 ---
 
@@ -257,7 +265,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ```mermaid
 flowchart LR
-    A["AI 编码工具<br/>Claude Code · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi · CodeBuddy · WorkBuddy · Grok · Kilo · Roo · Zed · Goose<br/>Antigravity · oh-my-pi · pi · Craft · Droid · Mimo · ZCode · Qoder · AnythingLLM · Claude Science · DeepSeek Harness · TRAE Work CN · LM Studio · Unsloth Studio"]
+    A["AI 编码工具<br/>Claude Code · Codex · AStudio · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi · CodeBuddy · WorkBuddy · Grok · Kilo · Roo · Zed · Goose<br/>Antigravity · oh-my-pi · pi · Craft · Droid · Mimo · ZCode · Qoder · AnythingLLM · Claude Science · DeepSeek Harness · TRAE Work CN · LM Studio · Unsloth Studio · Devin CLI"]
     A -->|hook 触发| B[Token Tracker]
     B -->|解析日志<br/>30 分钟 UTC 桶| C[(本地 SQLite)]
     C --> D[Web Dashboard]
@@ -268,7 +276,7 @@ flowchart LR
 
 1. 正常使用 AI CLI 工具时，它们会写 log
 2. 轻量级 hook 感知日志变动并触发同步（Cursor 走 API，不走 hook）
-3. token 数量在本地解析 —— **绝不**读取 prompt 或回复内容
+3. 在本地解析 token 数量 —— Prompt、回复正文和代码绝不保存或上传
 4. 聚合成 30 分钟一格的 UTC 桶
 5. Dashboard、菜单栏 App 和桌面小组件都读取同一份本地快照
 
@@ -278,12 +286,14 @@ flowchart LR
 
 > 📄 **[完整隐私政策](docs/PRIVACY.md)**（英文）—— 逐条列出本应用可能发起的每一个网络请求、各自发送了什么，以及如何关闭。
 
-| 承诺 | 说明 |
+TokenTracker 在本地处理你的用量数据。绝不收集或上传 prompt、代码或模型回复。
+
+| 保护项 | 说明 |
 |---|---|
-| **不上传内容** | 只记录 token 数量和时间戳。**绝不**记录 prompt、回复或文件内容 |
-| **默认纯本地** | 所有数据保留在你的机器上。排行榜是完全 opt-in |
-| **可审计** | 代码开源。[`src/lib/rollout.js`](src/lib/rollout.js) 里只有数字和时间戳 |
-| **仅匿名使用统计** | 只有两类匿名上报：(1) 每天最多一次的心跳——机器 ID 的单向哈希、应用版本、操作系统平台、运行形态（cli/macos/windows/linux）；(2) 匿名的 dashboard 页面/功能事件（PostHog——已关闭 autocapture 和会话录制，尊重浏览器 Do-Not-Track）。绝不包含 token 数量、模型名、prompt 或路径。可在 [`src/lib/telemetry.js`](src/lib/telemetry.js) 与 [`dashboard/src/lib/analytics.js`](dashboard/src/lib/analytics.js) 审计；一个开关同时关闭两者：`TOKENTRACKER_NO_TELEMETRY=1`（或 `DO_NOT_TRACK=1`） |
+| **不收集代码与 Prompt** | TokenTracker 解析本地日志文件中的 token 数量与时间戳。Prompt、回复正文、代码和对话内容绝不保存或上传。 |
+| **默认本地优先** | 用量追踪完全跑在你的本地机器上。无需账号、登录或 API Key。云端同步与公开排行榜完全属于自选（Opt-in）。 |
+| **可公开审计** | 完全开源。欢迎查阅 [`src/lib/rollout.js`](src/lib/rollout.js) —— 仅提取数字、时间戳与模型名称。 |
+| **透明的网络请求** | 完整披露于[隐私政策](docs/PRIVACY.md)。默认发起的网络请求仅限于：直接查询 provider 配额（使用你机器上已有的本地凭证）、获取 GitHub Star 数与检查更新、更新定价数据（`raw.githubusercontent.com`），以及匿名产品遥测（每日一次心跳和 PostHog 页面访问，均可通过 `TOKENTRACKER_NO_TELEMETRY=1` 或 `DO_NOT_TRACK=1` 关闭）。遥测绝不包含 token、模型名、prompt 或代码。 |
 
 ---
 
@@ -299,6 +309,7 @@ flowchart LR
 | `TOKENTRACKER_DISABLE_GIT_ATTRIBUTION` | 关闭 Git 提交归因（设为 `1` 关闭）。归因会在每个近期会话的工作目录里执行 `git log`。关闭后 TokenTracker 完全不会进入你的项目目录（Outcomes 页只显示手动记录的结果） | — |
 | `TOKENTRACKER_GIT_ATTRIBUTION_PROTECTED_DIRS` | 允许 Git 归因进入 macOS 受保护目录（设为 `1` 允许）。默认会跳过 `~/Documents`、`~/Downloads`、`~/Desktop`、`~/Library`、影片/音乐/图片以及 `/Volumes` 下的会话，因为 macOS 会为每个位置单独弹一次访问授权提示。只有当你确实把仓库放在这些目录、且不介意授权时才需要开启 | — |
 | `CODEX_HOME` | 覆盖 Codex CLI 目录 | `~/.codex` |
+| `TOKENTRACKER_ACODE_HOME` | 覆盖 AStudio 目录 | `~/.acode` |
 | `GEMINI_HOME` | 覆盖 Gemini CLI 目录 | `~/.gemini` |
 | `TOKENTRACKER_GROK_HOME` | 覆盖 Grok Build 目录，供 Grok 集成和 Skills Manager 使用 | `~/.grok` |
 | `GROK_HOME` | 旧版 Grok Build 目录覆盖变量；未设置 `TOKENTRACKER_GROK_HOME` 时使用 | `~/.grok` |

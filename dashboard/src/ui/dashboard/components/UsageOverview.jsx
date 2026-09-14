@@ -73,6 +73,7 @@ function parseAnimatedCounterValue(displayValue) {
 
 // Provider color mapping for visual distinction
 const PROVIDER_COLORS = {
+  ACODE: "var(--brand-primary-light)",
   CODEX: "#3b82f6",     // blue-500
   DSH: "var(--community-deepseek)", // DeepSeek Harness brand blue
   CLAUDE: "#d97757",    // Anthropic Japonica orange-red
@@ -339,6 +340,14 @@ export function UsageOverview({
     const source = String(provider.source || "").toLowerCase();
     return provider.isSyntheticAggregate || !source.startsWith("codex-root:");
   });
+  // Devin contributes real token counts but its models (swe-2, swe-2-high,
+  // compactor) ship without pricing data, so the dollar figure silently
+  // under-reports whenever Devin is in view — surface the notice on both the
+  // provider drill-down and the combined "All" ranking.
+  const devinContributes = providers.some(
+    (provider) =>
+      String(provider?.source || provider?.label || "").trim().toLowerCase() === "devin",
+  );
   const allModels = useMemo(() => buildAllModels(fleetData), [fleetData]);
   const allUsage = allModels.reduce((sum, model) => sum + (Number(model.usage) || 0), 0);
   const allCost = meteredProviders.reduce((sum, provider) => sum + (Number(provider.usd) || 0), 0);
@@ -632,6 +641,7 @@ export function UsageOverview({
                 aria-label={copy("usage.overview.all_models")}
                 className="mt-2"
               >
+                {devinContributes && <DevinPricingNotice />}
                 <AllModelsSection models={allModels} />
               </div>
             )}
@@ -755,11 +765,24 @@ function AllModelsSection({ models }) {
   );
 }
 
+function DevinPricingNotice() {
+  return (
+    <p className="mb-3 text-[10px] leading-snug text-oai-gray-400 dark:text-oai-gray-500">
+      <span className="font-medium text-oai-gray-500 dark:text-oai-gray-400">
+        {copy("usage.overview.devin_notice_title")}.
+      </span>{" "}
+      {copy("usage.overview.devin_notice_body")}
+    </p>
+  );
+}
+
 function ProviderExpandedSection({ provider, color, providerHeading, contextSource, contextRequestSource, from, to, sortedModels }) {
   const { formatTokens } = useTokenFormat();
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const isAntigravity =
     String(provider?.source || provider?.label || "").trim().toLowerCase() === "antigravity";
+  const isDevin =
+    String(provider?.source || provider?.label || "").trim().toLowerCase() === "devin";
 
   return (
                       <div>
@@ -808,6 +831,12 @@ function ProviderExpandedSection({ provider, color, providerHeading, contextSour
                             {copy("usage.overview.antigravity_notice_body")}
                           </p>
                         )}
+
+                        {/* Devin token counts are real (read from the CLI's local
+                            history), but swe-2/swe-2-high/compactor carry no
+                            verified pricing, so the dollar figure excludes them —
+                            a $0 estimate is not evidence of free usage. */}
+                        {isDevin && <DevinPricingNotice />}
 
                         {/* Context Breakdown drill-down.
                             Claude: category-based (approx /context).

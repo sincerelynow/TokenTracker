@@ -36,7 +36,6 @@ const DEEPSEEK_TIME_PRICED_MODELS = [
   "deepseek-v4-flash",
   "deepseek-v4-pro",
 ];
-
 // Sync seed load. Done at require-time so callers that haven't awaited
 // ensurePricingLoaded() (e.g. tests, vite mock startup, edge functions) still
 // get LiteLLM-backed pricing instead of all-zero. ensurePricingLoaded() will
@@ -163,7 +162,11 @@ function isDeepSeekOffPeak(row) {
 }
 
 function getRowPricing(row) {
-  const pricing = getModelPricing(row?.model, { source: canonicalUsageSource(row?.source) });
+  const source = canonicalUsageSource(row?.source);
+  const pricing = getModelPricing(row?.model, { source });
+  // AStudio uses iFlytek MaaS fixed prices and does not inherit DeepSeek public API
+  // time-based discounts.
+  if (source === "acode") return pricing;
   if (!isDeepSeekTimePricedModel(row?.model) || !isDeepSeekOffPeak(row)) return pricing;
   return {
     ...pricing,
@@ -193,7 +196,8 @@ function computeRowCost(row) {
     reportedCost > 0
   ) return reportedCost;
   const pricing = getRowPricing(row);
-  const reasoningIncludedInOutput = isCodexSource(row.source) || row.source === "every-code";
+  const reasoningIncludedInOutput =
+    isCodexSource(row.source) || row.source === "acode" || row.source === "every-code";
   const reasoningCost = reasoningIncludedInOutput
     ? 0
     : (row.reasoning_output_tokens || 0) * (pricing.output || 0);

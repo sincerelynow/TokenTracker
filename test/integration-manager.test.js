@@ -69,6 +69,39 @@ test("integration manager rejects unknown providers and unavailable providers", 
   }
 });
 
+test("integration manager manages AStudio notify without automatic setup", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-integrations-acode-"));
+  const trackerDir = path.join(home, ".tokentracker", "tracker");
+  const binDir = path.join(home, ".tokentracker", "bin");
+  const acodeHome = path.join(home, ".acode");
+  const configPath = path.join(acodeHome, "config.toml");
+  const options = {
+    home,
+    trackerDir,
+    binDir,
+    env: { HOME: home, TOKENTRACKER_ACODE_HOME: acodeHome },
+  };
+
+  try {
+    await fs.mkdir(acodeHome, { recursive: true });
+    await fs.writeFile(configPath, 'model = "spark-x1"\n', "utf8");
+
+    const before = await listIntegrations(options);
+    assert.equal(before.find((item) => item.id === "acode").installed, false);
+
+    const installed = await mutateIntegration("acode", "install", options);
+    assert.equal(installed.integration.installed, true);
+    assert.match(await fs.readFile(configPath, "utf8"), /--source=acode/);
+
+    const removed = await mutateIntegration("acode", "uninstall", options);
+    assert.equal(removed.integration.installed, false);
+    assert.doesNotMatch(await fs.readFile(configPath, "utf8"), /--source=acode/);
+    assert.match(await fs.readFile(configPath, "utf8"), /spark-x1/);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
 test("integration manager detects and safely removes the legacy OpenClaw hook", async () => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-integrations-openclaw-"));
   const trackerDir = path.join(home, ".tokentracker", "tracker");

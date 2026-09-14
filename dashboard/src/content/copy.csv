@@ -578,10 +578,13 @@ settings.appearance.theme.system,ui,SettingsPage,SettingsPage,theme_system,"Syst
 settings.appearance.currency.label,ui,SettingsPage,SettingsPage,currency_label,"Currency",,active
 settings.appearance.currency.hint,ui,SettingsPage,SettingsPage,currency_hint,"Select the display currency for usage costs.",,active
 settings.appearance.token_format.label,ui,SettingsPage,SettingsPage,token_format_label,"Token numbers",,active
-settings.appearance.token_format.hint,ui,SettingsPage,SettingsPage,token_format_hint,"Apply K/M/B, Chinese units, or full numbers everywhere. Hover compact values to see the exact number.",,active
+settings.appearance.token_format.hint,ui,SettingsPage,SettingsPage,token_format_hint,"Apply compact or full numbers everywhere. Hover compact values to see the exact number.",,active
 settings.appearance.token_format.compact,ui,SettingsPage,SettingsPage,token_format_compact,"Compact",,active
-settings.appearance.token_format.chinese,ui,SettingsPage,SettingsPage,token_format_chinese,"Chinese units (Wan/Yi)",,active
 settings.appearance.token_format.full,ui,SettingsPage,SettingsPage,token_format_full,"Full",,active
+settings.appearance.token_unit.label,ui,SettingsPage,SettingsPage,token_unit_label,"Number units",,active
+settings.appearance.token_unit.hint,ui,SettingsPage,SettingsPage,token_unit_hint,"Compact numbers use K/M/B or Wan/Yi units. Full numbers ignore units.",,active
+settings.appearance.token_unit.english,ui,SettingsPage,SettingsPage,token_unit_english,"K/M/B",,active
+settings.appearance.token_unit.chinese,ui,SettingsPage,SettingsPage,token_unit_chinese,"Wan/Yi",,active
 settings.appearance.currency.opt.usd,ui,SettingsPage,SettingsPage,currency_opt_usd,"USD ($)",,active
 settings.appearance.currency.opt.eur,ui,SettingsPage,SettingsPage,currency_opt_eur,"EUR (€)",,active
 settings.appearance.currency.opt.gbp,ui,SettingsPage,SettingsPage,currency_opt_gbp,"GBP (£)",,active
@@ -771,6 +774,8 @@ usage.overview.cache_hit_rate_label,ui,DashboardPage,UsageOverview,cache_hit_rat
 usage.overview.cache_hit_rate_detail,ui,DashboardPage,UsageOverview,cache_hit_rate_detail,"{{reused}} reused / {{input}} input",,active
 usage.overview.antigravity_notice_title,ui,DashboardPage,UsageOverview,antigravity_notice_title,"Estimated tokens",,active
 usage.overview.antigravity_notice_body,ui,DashboardPage,UsageOverview,antigravity_notice_body,"Antigravity transcripts don't record real usage numbers. These counts are estimated from text length (~4 chars/token) and don't reflect Gemini's prompt-cache discount, so treat them as an upper bound, not a billing figure.",,active
+usage.overview.devin_notice_title,ui,DashboardPage,UsageOverview,devin_notice_title,"Cost not estimated",,active
+usage.overview.devin_notice_body,ui,DashboardPage,UsageOverview,devin_notice_body,"Devin reports real local token counts, but swe-2, swe-2-high and compactor have no pricing data in this build, so they are excluded from dollar estimates. A $0 figure does not mean the usage was free.",,active
 usage.overview.week_cross_month_hint,ui,DashboardPage,UsageOverview,week_cross_month_hint,"This week spans two calendar months, so its total is not directly comparable with a single month's usage",,active
 limits.panel.title,ui,LimitsPage,UsageLimitsPanel,title,"Usage Limits",,active
 limits.panel.mode_separator,ui,LimitsPage,UsageLimitsPanel,title_separator," · ",,active
@@ -1244,10 +1249,17 @@ skills.toast.bulk_removed,ui,SkillsPage,SkillsPage,toast_bulk_removed,"Removed {
 skills.toast.synced_one,ui,SkillsPage,SkillsPage,toast_synced_one,"Synced {{name}} to {{agent}}.",,active
 skills.toast.unsynced_one,ui,SkillsPage,SkillsPage,toast_unsynced_one,"Unsynced {{name}} from {{agent}}.",,active
 skills.toast.updated,ui,SkillsPage,SkillsPage,toast_updated,"Updated {{name}}.",,active
+skills.toast.updated_many,ui,SkillsPage,SkillsPage,toast_updated_many,"Updated {{count}} skills.",,active
+skills.toast.updated_partial,ui,SkillsPage,SkillsPage,toast_updated_partial,"Updated {{count}} of {{total}} skills. {{failed}} failed.",,active
+skills.toast.updated_none,ui,SkillsPage,SkillsPage,toast_updated_none,"All skills are already up to date.",,active
 skills.confirm.bulk_remove_title,ui,SkillsPage,SkillsPage,confirm_bulk_remove_title,"Remove {{count}} skills?",,active
 skills.confirm.bulk_remove_desc,ui,SkillsPage,SkillsPage,confirm_bulk_remove_desc,"This unsyncs each skill from every agent and deletes its local copy.",,active
+skills.confirm.update_all_title,ui,SkillsPage,SkillsPage,confirm_update_all_title,"Update {{count}} skills?",,active
+skills.confirm.update_all_desc,ui,SkillsPage,SkillsPage,confirm_update_all_desc,"Each skill is re-downloaded from its source repository, replacing the local copy.",,active
 skills.update.available,ui,SkillsPage,SkillDetailPanel,update_available,"A newer version is available upstream.",,active
 skills.update.action,ui,SkillsPage,SkillDetailPanel,update_action,"Update",,active
+skills.update.all_action,ui,SkillsPage,SkillsPage,update_all_action,"Update all ({{count}})",,active
+skills.update.rate_limited,ui,SkillsPage,SkillsPage,update_rate_limited,"GitHub rate limit reached after {{count}} updates. Try again in an hour.",,active
 skills.usage.section_title,ui,SkillsPage,SkillDetailPanel,usage_section_title,"Activity",,active
 skills.usage.invocations,ui,SkillsPage,SkillDetailPanel,usage_invocations,"Invocations",,active
 skills.usage.cost,ui,SkillsPage,SkillDetailPanel,usage_cost,"Est. cost",,active
@@ -1662,6 +1674,14 @@ limits.commandCode.setupHint.snippet_login_windows,ui,LimitsPage,UsageLimitsPane
 limits.commandCode.setupHint.snippet_env_windows,ui,LimitsPage,UsageLimitsPanel,command_code_hint_snippet_env_windows,"$token = Read-Host -AsSecureString\n$env:COMMAND_CODE_API_KEY = [System.Net.NetworkCredential]::new('', $token).Password\n[Environment]::SetEnvironmentVariable('COMMAND_CODE_API_KEY', $env:COMMAND_CODE_API_KEY, 'User')",,active
 limits.commandCode.setupHint.note_windows,ui,LimitsPage,UsageLimitsPanel,command_code_hint_note_windows,"Windows: run in PowerShell, then restart TokenTracker.",,active
 limits.commandCode.setupHint.note_linux,ui,LimitsPage,UsageLimitsPanel,command_code_hint_note_linux,"Linux: start TokenTracker from this terminal to inherit the environment variable.",,active
-landing.discovery.tracked_usage,landing,LandingPage,index.html,tracked_usage,"Token Tracker tracks input, output, cached, and cache-creation tokens per model, project, and time window. It also detects usage limits for 14 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, and Command Code.",Build-time static discovery copy,active
-landing.discovery.limits_summary,landing,LandingPage,index.html,limits_summary,"live quota and subscription status for 14 providers, with last-good caching for local providers such as Antigravity and Qoder.",Build-time static discovery copy,active
-landing.discovery.faq_usage,landing,LandingPage,index.html,faq_usage,"Input, output, cached, and cache-creation tokens per model, project, and time window. It also surfaces usage limits for 14 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, and Command Code.",Build-time static discovery copy,active
+landing.discovery.tracked_usage,landing,LandingPage,index.html,tracked_usage,"Token Tracker tracks input, output, cached, and cache-creation tokens per model, project, and time window. It also detects usage limits for 17 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, Command Code, and Devin.",Build-time static discovery copy,active
+landing.discovery.limits_summary,landing,LandingPage,index.html,limits_summary,"live quota and subscription status for 17 providers, with last-good caching for local providers such as Antigravity and Qoder.",Build-time static discovery copy,active
+landing.discovery.faq_usage,landing,LandingPage,index.html,faq_usage,"Input, output, cached, and cache-creation tokens per model, project, and time window. It also surfaces usage limits for 17 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, Command Code, and Devin.",Build-time static discovery copy,active
+limits.provider.devin,ui,LimitsPage,UsageLimitsPanel,provider_devin,"Devin",,active
+limits.label.devin_daily,ui,LimitsPage,UsageLimitsPanel,devin_daily,"Daily",,active
+limits.label.devin_weekly,ui,LimitsPage,UsageLimitsPanel,devin_weekly,"Weekly",,active
+limits.devin.setupHint.title,ui,LimitsPage,UsageLimitsPanel,devin_hint_title,"Connect Devin",,active
+limits.devin.setupHint.subtitle,ui,LimitsPage,UsageLimitsPanel,devin_hint_subtitle,"Reads your Devin subscription quota with the Devin CLI's saved sign-in on this machine.",,active
+limits.devin.setupHint.step1,ui,LimitsPage,UsageLimitsPanel,devin_hint_step1,"Install the Devin CLI and sign in with the command below — TokenTracker picks it up with no restart.",,active
+limits.devin.setupHint.note,ui,LimitsPage,UsageLimitsPanel,devin_hint_note,"Refresh this page after signing in. TokenTracker sends the saved session token only to Devin's official quota endpoint.",,active
+limits.devin.setupHint.snippet_login,ui,LimitsPage,UsageLimitsPanel,devin_hint_snippet_login,"devin auth login",,active

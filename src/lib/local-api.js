@@ -3278,6 +3278,11 @@ function createLocalApiHandler({ queuePath }) {
             json(res, { ok: true, skill: await skills.installSkill(body.skill, body.targets || ["claude", "codex"]) });
             return true;
           }
+          if (action === "update_all") {
+            // Partial success is normal, so this reports per-skill rather than failing.
+            json(res, { ok: true, ...(await skills.updateSkills(Array.isArray(body.ids) ? body.ids : [])) });
+            return true;
+          }
           if (action === "uninstall") {
             json(res, { ok: true, ...(skills.uninstallSkill(body.id) || {}) });
             return true;
@@ -3333,6 +3338,19 @@ function createLocalApiHandler({ queuePath }) {
     if (p === "/functions/tokentracker-usage-limits") {
       const { getUsageLimits, resetUsageLimitsCache } = require("./usage-limits");
       try {
+        // Devin quota is opt-in (Settings > Usage & Limits > Providers). An
+        // explicit devin=1 without local authentication is rejected before any
+        // cache reset or provider work — silently downgrading it to a disabled
+        // response would misreport an enabled client as a disabled provider.
+        // Authorization is evaluated unconditionally so the check never depends
+        // on the user-controlled opt-in flag itself.
+        const localAuthorized = isAuthorizedLocalMutation(req);
+        const devinParam = url.searchParams.get("devin");
+        const devinEnabled = devinParam === "1" || devinParam === "true";
+        if (devinEnabled && !localAuthorized) {
+          json(res, { error: "Unauthorized" }, 401);
+          return true;
+        }
         const refreshParam = url.searchParams.get("refresh");
         const forceRefresh = refreshParam === "1" || refreshParam === "true";
         if (forceRefresh) {
@@ -3345,6 +3363,7 @@ function createLocalApiHandler({ queuePath }) {
           // Punches through the Claude disk fresh-cache (but not the 429
           // cooldown) — an explicit user refresh should hit upstream.
           forceRefresh,
+          devinEnabled,
         });
         json(res, data);
       } catch (e) {

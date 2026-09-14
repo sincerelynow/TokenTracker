@@ -5,13 +5,17 @@ const os = require("node:os");
 const path = require("node:path");
 
 const {
+  buildAcodeNotifyCmd,
   buildCodexNotifyCmd,
   buildEveryCodeNotifyCmd,
   isManagedNotifyCmd,
+  readAcodeNotify,
   readCodexNotify,
   readEveryCodeNotify,
+  restoreAcodeNotify,
   restoreCodexNotify,
   restoreEveryCodeNotify,
+  upsertAcodeNotify,
   upsertCodexNotify,
   upsertEveryCodeNotify,
 } = require("./codex-config");
@@ -69,6 +73,10 @@ function buildContext({ home, trackerDir, binDir, env }) {
   }
   const notifyPath = path.join(binDir, "notify.cjs");
   const codexConfigPath = path.join(env.CODEX_HOME || path.join(home, ".codex"), "config.toml");
+  const acodeConfigPath = path.join(
+    env.TOKENTRACKER_ACODE_HOME || path.join(home, ".acode"),
+    "config.toml",
+  );
   const codeConfigPath = path.join(env.CODE_HOME || path.join(home, ".code"), "config.toml");
   const claudeDir = path.join(home, ".claude");
   const codebuddyDir = env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
@@ -81,6 +89,7 @@ function buildContext({ home, trackerDir, binDir, env }) {
     env: integrationEnv,
     notifyPath,
     codexConfigPath,
+    acodeConfigPath,
     codeConfigPath,
     claudeDir,
     claudeSettingsPath: path.join(claudeDir, "settings.json"),
@@ -92,6 +101,7 @@ function buildContext({ home, trackerDir, binDir, env }) {
     geminiSettingsPath: resolveGeminiSettingsPath({ configDir: geminiConfigDir }),
     opencodeConfigDir: resolveOpencodeConfigDir({ home, env: integrationEnv }),
     notifyOriginalPath: path.join(trackerDir, "codex_notify_original.json"),
+    acodeNotifyOriginalPath: path.join(trackerDir, "acode_notify_original.json"),
     codeNotifyOriginalPath: path.join(trackerDir, "code_notify_original.json"),
   };
 }
@@ -144,6 +154,33 @@ const adapters = [
         codexConfigPath: c.codexConfigPath,
         notifyOriginalPath: c.notifyOriginalPath,
         notifyCmd: buildCodexNotifyCmd(c.notifyPath),
+      });
+    },
+  },
+  {
+    id: "acode",
+    label: "AStudio",
+    kind: "notify",
+    async probe(c) {
+      const detected = await pathExists(c.acodeConfigPath, "file");
+      const installed = detected && isManagedNotifyCmd(
+        await readAcodeNotify(c.acodeConfigPath),
+        buildAcodeNotifyCmd(c.notifyPath),
+      );
+      return state(this, detected, installed, detected ? "config.toml detected" : "config.toml not found");
+    },
+    async install(c) {
+      return upsertAcodeNotify({
+        acodeConfigPath: c.acodeConfigPath,
+        notifyCmd: buildAcodeNotifyCmd(c.notifyPath),
+        notifyOriginalPath: c.acodeNotifyOriginalPath,
+      });
+    },
+    async uninstall(c) {
+      return restoreAcodeNotify({
+        acodeConfigPath: c.acodeConfigPath,
+        notifyOriginalPath: c.acodeNotifyOriginalPath,
+        notifyCmd: buildAcodeNotifyCmd(c.notifyPath),
       });
     },
   },

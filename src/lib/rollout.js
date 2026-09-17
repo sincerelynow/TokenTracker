@@ -22,6 +22,11 @@ const {
   snapshotCodexModelAttributionState,
 } = require("./codex-model-attribution");
 const {
+  CODEX_SERVICE_TIER_MARKER,
+  readCodexServiceTier,
+  isPriorityServiceTier,
+} = require("./codex-service-tier");
+const {
   DEVIN_TABLE_PROBE_SQL,
   devinUsageSql,
   buildDevinUsageEvents,
@@ -475,6 +480,7 @@ async function parseRolloutIncremental({
       ? prev.tokenUsageBaselines || null
       : null;
     const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
+    const lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
     const modelAttributionState = sameInode && !truncated
       ? prev.modelAttributionState || null
       : null;
@@ -555,6 +561,7 @@ async function parseRolloutIncremental({
           lastTotal,
           tokenUsageBaselines,
           lastModel,
+          lastServiceTier,
           modelAttributionState,
           projectState,
           projectMetaCache,
@@ -570,6 +577,7 @@ async function parseRolloutIncremental({
           lastTotal,
           tokenUsageBaselines,
           lastModel,
+          lastServiceTier,
           modelAttributionState,
           hourlyState,
           touchedBuckets,
@@ -594,6 +602,7 @@ async function parseRolloutIncremental({
       lastTotal: result.lastTotal,
       tokenUsageBaselines: result.tokenUsageBaselines,
       lastModel: result.lastModel,
+      lastServiceTier: result.lastServiceTier || null,
       modelAttributionState: result.modelAttributionState,
       updatedAt: new Date().toISOString(),
     };
@@ -2065,6 +2074,7 @@ async function parseRolloutFile({
   lastTotal,
   tokenUsageBaselines,
   lastModel,
+  lastServiceTier,
   modelAttributionState: previousModelAttributionState,
   hourlyState,
   touchedBuckets,
@@ -2093,6 +2103,7 @@ async function parseRolloutFile({
       lastTotal,
       tokenUsageBaselines,
       lastModel,
+      lastServiceTier: typeof lastServiceTier === "string" ? lastServiceTier : null,
       modelAttributionState: previousModelAttributionState,
       eventsAggregated: 0,
       projectFileContexts,
@@ -2105,6 +2116,12 @@ async function parseRolloutFile({
   });
 
   let model = typeof lastModel === "string" ? lastModel : null;
+  // Codex writes thread_settings_applied before the turn_context of the turn it
+  // takes effect on, and token_count rows carry no turn id, so a row's tier is
+  // whatever the last such record said. A session's first turn has none, and
+  // most CLI sessions have none at all — that stays null, and null is billed at
+  // Standard rather than guessed from the current config.
+  let serviceTier = typeof lastServiceTier === "string" ? lastServiceTier : null;
   const modelAttributionState = createCodexModelAttributionState(
     previousModelAttributionState || { model },
   );
@@ -2155,7 +2172,10 @@ async function parseRolloutFile({
         line.includes('"cwd"') ||
         line.includes('"current_date"') ||
         line.includes('"forked_from_id"'));
-    if (!maybeTokenCount && !maybeTurnContext && !maybeModelReroute) {
+    const maybeServiceTier =
+      !maybeTokenCount && !maybeModelReroute && !maybeTurnContext &&
+      line.includes(CODEX_SERVICE_TIER_MARKER);
+    if (!maybeTokenCount && !maybeTurnContext && !maybeModelReroute && !maybeServiceTier) {
       if (invalidRecordPolicy === "throw" || !record.terminated) {
         try {
           JSON.parse(line);
@@ -2180,6 +2200,12 @@ async function parseRolloutFile({
 
     applyCodexModelEvent(modelAttributionState, obj);
     model = currentCodexModel(modelAttributionState) || model;
+
+    const appliedServiceTier = readCodexServiceTier(obj);
+    if (appliedServiceTier) {
+      serviceTier = appliedServiceTier;
+      continue;
+    }
 
     if (
       (obj?.type === "turn_context" || obj?.type === "session_meta") &&
@@ -2308,6 +2334,9 @@ async function parseRolloutFile({
 
     const bucket = getHourlyBucket(hourlyState, bucketSource, model, bucketStart);
     addTotals(bucket.totals, delta);
+    // Only the model bucket gets the subset: the project bucket below carries
+    // no model, so no per-model rate can be applied to it anyway.
+    if (isPriorityServiceTier(serviceTier)) addPriorityUsage(bucket.totals, delta);
     touchedBuckets.add(bucketKey(bucketSource, model, bucketStart));
     if (currentProjectKey && projectState && projectTouchedBuckets) {
       const projectBucket = getProjectBucket(
@@ -2328,6 +2357,7 @@ async function parseRolloutFile({
     lastTotal: latestTotal,
     tokenUsageBaselines: snapshotUsageBaselines(usageDeltaState),
     lastModel: model,
+    lastServiceTier: serviceTier,
     modelAttributionState: snapshotCodexModelAttributionState(modelAttributionState),
     eventsAggregated,
     projectFileContexts,
@@ -2340,6 +2370,7 @@ async function scanRolloutProjectFileContexts({
   lastTotal,
   tokenUsageBaselines,
   lastModel,
+  lastServiceTier,
   modelAttributionState,
   projectState,
   projectMetaCache,
@@ -2358,6 +2389,7 @@ async function scanRolloutProjectFileContexts({
       lastTotal,
       tokenUsageBaselines,
       lastModel,
+      lastServiceTier: lastServiceTier || null,
       modelAttributionState,
       eventsAggregated: 0,
       projectFileContexts,
@@ -2435,6 +2467,7 @@ async function scanRolloutProjectFileContexts({
     lastTotal,
     tokenUsageBaselines,
     lastModel,
+    lastServiceTier: lastServiceTier || null,
     modelAttributionState,
     eventsAggregated: 0,
     projectFileContexts,
@@ -3010,6 +3043,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             billable_total_tokens: totals.billable_total_tokens ?? totals.total_tokens,
             total_cost_usd: totals.total_cost_usd || 0,
             usage_precision: usagePrecision || undefined,
+            ...prioritySubsetOf(totals),
             conversation_count: totals.conversation_count,
           }),
         );
@@ -3090,6 +3124,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
         billable_total_tokens: unknownBucket.totals.billable_total_tokens ?? unknownBucket.totals.total_tokens,
         total_cost_usd: unknownBucket.totals.total_cost_usd || 0,
         usage_precision: usagePrecision || undefined,
+        ...prioritySubsetOf(unknownBucket.totals),
         conversation_count: unknownBucket.totals.conversation_count,
       }),
     );
@@ -3138,6 +3173,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           total_tokens: group.totals.total_tokens,
           billable_total_tokens: group.totals.billable_total_tokens ?? group.totals.total_tokens,
           total_cost_usd: group.totals.total_cost_usd || 0,
+          ...prioritySubsetOf(group.totals),
           conversation_count: group.totals.conversation_count,
         }),
       );
@@ -3723,7 +3759,43 @@ function initTotals() {
   };
 }
 
+// Observed-subset markers, same shape as the session sidecar's
+// long_context_* columns: "how much of the columns above came from requests on
+// the priority (Astra Fast) service tier". They annotate the existing columns
+// and are NEVER part of any sum — total_tokens stays
+// input + output + cache_creation + cache_read + reasoning_output. They are
+// omitted entirely when zero so no other provider's queue rows change.
+const PRIORITY_SUBSET_FIELDS = [
+  ["priority_input_tokens", "input_tokens"],
+  ["priority_cached_input_tokens", "cached_input_tokens"],
+  ["priority_cache_creation_input_tokens", "cache_creation_input_tokens"],
+  ["priority_output_tokens", "output_tokens"],
+  ["priority_reasoning_output_tokens", "reasoning_output_tokens"],
+];
+
+// The whole delta belongs to a priority request, so every base column it
+// carries is priority usage.
+function addPriorityUsage(target, delta) {
+  for (const [field, base] of PRIORITY_SUBSET_FIELDS) {
+    const value = Number(delta?.[base] || 0);
+    if (value > 0) target[field] = (Number(target[field]) || 0) + value;
+  }
+}
+
+function prioritySubsetOf(totals) {
+  const subset = {};
+  for (const [field] of PRIORITY_SUBSET_FIELDS) {
+    const value = Number(totals?.[field]) || 0;
+    if (value > 0) subset[field] = value;
+  }
+  return subset;
+}
+
 function addTotals(target, delta) {
+  for (const [field] of PRIORITY_SUBSET_FIELDS) {
+    const value = Number(delta?.[field]) || 0;
+    if (value > 0) target[field] = (Number(target[field]) || 0) + value;
+  }
   target.input_tokens += delta.input_tokens || 0;
   target.cached_input_tokens += delta.cached_input_tokens || 0;
   target.cache_creation_input_tokens += delta.cache_creation_input_tokens || 0;
@@ -3738,6 +3810,11 @@ function addTotals(target, delta) {
 }
 
 function subtractTotals(target, totals) {
+  for (const [field] of PRIORITY_SUBSET_FIELDS) {
+    const current = Number(target[field]) || 0;
+    if (current <= 0) continue;
+    target[field] = Math.max(0, current - (Number(totals?.[field]) || 0));
+  }
   target.input_tokens = Math.max(0, target.input_tokens - (totals.input_tokens || 0));
   target.cached_input_tokens = Math.max(
     0,
@@ -3771,7 +3848,7 @@ function subtractTotals(target, totals) {
 }
 
 function totalsKey(totals) {
-  return [
+  const base = [
     totals.input_tokens || 0,
     totals.cached_input_tokens || 0,
     totals.cache_creation_input_tokens || 0,
@@ -3782,6 +3859,10 @@ function totalsKey(totals) {
     totals.total_cost_usd || 0,
     totals.conversation_count || 0,
   ].join("|");
+  // Appended only when a priority subset exists, so buckets that never see the
+  // tier keep their previously persisted queuedKey and are not re-enqueued.
+  const priority = PRIORITY_SUBSET_FIELDS.map(([field]) => Number(totals[field]) || 0);
+  return priority.some((value) => value > 0) ? `${base}|p:${priority.join(",")}` : base;
 }
 
 function toUtcHalfHourStart(ts) {
@@ -10822,8 +10903,10 @@ function resolveOmpAgentDir(env = process.env) {
   return ompHome ? path.join(ompHome, "agent") : null;
 }
 
-function resolveOmpSessionFiles(env = process.env) {
-  const agentDir = resolveOmpAgentDir(env);
+// Session-file discovery is shared with OmO (omo), which persists the exact
+// same on-disk layout under its own agent dir:
+//   <agentDir>/sessions/--<cwd-encoded>--/<timestamp>_<sessionId>.jsonl
+function collectPiStyleSessionFiles(agentDir) {
   if (!agentDir) return [];
   const sessionsDir = path.join(agentDir, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
@@ -10848,6 +10931,10 @@ function resolveOmpSessionFiles(env = process.env) {
   return files;
 }
 
+function resolveOmpSessionFiles(env = process.env) {
+  return collectPiStyleSessionFiles(resolveOmpAgentDir(env));
+}
+
 // Subagent transcripts live in a directory named after the session file:
 //   ~/.omp/agent/sessions/<cwd>/<session>.jsonl            (main agent)
 //   ~/.omp/agent/sessions/<cwd>/<session>/<Agent>.jsonl    (task subagent)
@@ -10856,8 +10943,8 @@ function resolveOmpSessionFiles(env = process.env) {
 // rel path <= 2 segments → main, deeper → subagent/advisor), so we mirror
 // that: everything below the cwd level is subagent traffic. Session dirs also
 // hold non-JSONL artefacts (*.bash-original.log, *.md) — skipped by extension.
-function resolveOmpSubagentFiles(env = process.env) {
-  const agentDir = resolveOmpAgentDir(env);
+// OmO nests the same way, so it reuses this walker.
+function collectPiStyleSubagentFiles(agentDir) {
   if (!agentDir) return [];
   const sessionsDir = path.join(agentDir, "sessions");
   if (!fssync.existsSync(sessionsDir)) return [];
@@ -10905,20 +10992,24 @@ function resolveOmpSubagentFiles(env = process.env) {
   return files;
 }
 
+function resolveOmpSubagentFiles(env = process.env) {
+  return collectPiStyleSubagentFiles(resolveOmpAgentDir(env));
+}
+
 function resolveOmpDefaultModel() {
   // oh-my-pi has no global default model setting; model is per-message.
   return "omp-unknown";
 }
 
-const OMP_HEADER_SCAN_MAX_BYTES = 65536;
+const PI_STYLE_HEADER_SCAN_MAX_BYTES = 65536;
 
-async function resolveOmpFileCwd(filePath) {
+async function readPiStyleSessionCwd(filePath) {
   let stream;
   try {
     stream = fssync.createReadStream(filePath, {
       encoding: "utf8",
       start: 0,
-      end: OMP_HEADER_SCAN_MAX_BYTES,
+      end: PI_STYLE_HEADER_SCAN_MAX_BYTES,
     });
   } catch {
     return null;
@@ -10937,6 +11028,95 @@ async function resolveOmpFileCwd(filePath) {
     stream.close?.();
   }
   return null;
+}
+
+async function resolveOmpFileCwd(filePath) {
+  return readPiStyleSessionCwd(filePath);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OmO (omo) — passive JSONL reader (~/.omo/agent/sessions/**/*.jsonl)
+//
+// OmO shares oh-my-pi's session persistence format, so it reuses the same
+// collectors and parser. Layout:
+//   ~/.omo/agent/sessions/--<cwd-encoded>--/<timestamp>_<sessionId>.jsonl
+//
+// First line is the type:"session" header (carries the real, unencoded cwd).
+// Only type:"message" lines with message.role=="assistant" carry usage:
+//
+//   {
+//     "type": "message",
+//     "id": "7ae3734f",              ← 8-char dedup key
+//     "timestamp": "2026-08-27T23:28:16.699Z",
+//     "message": {
+//       "role": "assistant",
+//       "provider": "xai",
+//       "model": "grok-4.6",
+//       "usage": {
+//         "input": 28646, "output": 630, "cacheRead": 512, "cacheWrite": 0,
+//         "reasoning": 218, "totalTokens": 29788,
+//         "cost": { ... }            ← OmO's own estimate; ignored, we price it
+//       },
+//       "timestamp": 1787873284870   ← ms epoch, preferred for bucketing
+//     }
+//   }
+//
+// Two deliberate differences from oh-my-pi:
+//   1. The reasoning field is `reasoning`, not `reasoningTokens`.
+//   2. Reasoning is a SUBSET of `output`, and `totalTokens` excludes it —
+//      verified across a 2,586-message corpus where
+//      input+output+cacheRead+cacheWrite === totalTokens for every row, and
+//      `usage.cost` bills no separate reasoning component. So omo follows the
+//      Codex convention: reasoning_output_tokens is informational and must not
+//      be billed on top of output (see computeRowCost in lib/pricing/index.js).
+//
+// OmO is a router — the upstream model name is recorded per message and there
+// is no global default (fallback: "omo-unknown").
+//
+// Path overrides are TokenTracker-only (TOKENTRACKER_OMO_AGENT_DIR /
+// TOKENTRACKER_OMO_HOME / OMO_HOME). PI_CONFIG_DIR and PI_CODING_AGENT_DIR are
+// deliberately NOT honored here: those belong to pi/omp, and routing them to a
+// third provider would reintroduce the ambiguity decidePiCodingAgentDirOwner
+// exists to resolve.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveOmoHome(env = process.env) {
+  if (env.TOKENTRACKER_OMO_HOME) return expandHomePath(env.TOKENTRACKER_OMO_HOME, env);
+  if (env.OMO_HOME) return expandHomePath(env.OMO_HOME, env);
+  const home = env.HOME || require("node:os").homedir();
+  if (process.platform === "win32") {
+    return pickWin32ProviderPath({
+      env,
+      nativeValue: path.join(home, ".omo"),
+      wslProviderDir: ".omo",
+    });
+  }
+  return path.join(home, ".omo");
+}
+
+function resolveOmoAgentDir(env = process.env) {
+  if (env.TOKENTRACKER_OMO_AGENT_DIR) {
+    return expandHomePath(env.TOKENTRACKER_OMO_AGENT_DIR, env);
+  }
+  const omoHome = resolveOmoHome(env);
+  return omoHome ? path.join(omoHome, "agent") : null;
+}
+
+function resolveOmoSessionFiles(env = process.env) {
+  return collectPiStyleSessionFiles(resolveOmoAgentDir(env));
+}
+
+function resolveOmoSubagentFiles(env = process.env) {
+  return collectPiStyleSubagentFiles(resolveOmoAgentDir(env));
+}
+
+function resolveOmoDefaultModel() {
+  // OmO has no global default model setting; model is per-message.
+  return "omo-unknown";
+}
+
+async function resolveOmoFileCwd(filePath) {
+  return readPiStyleSessionCwd(filePath);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14520,7 +14700,23 @@ async function parseKilocodeIncremental({
   return { recordsProcessed, eventsAggregated, bucketsQueued };
 }
 
-async function parseOmpIncremental({
+// Reads the first present numeric field. oh-my-pi emits `reasoningTokens`;
+// OmO emits `reasoning`. Listing the accepted keys per provider keeps each
+// one's accounting exact instead of guessing across both spellings.
+function pickUsageInt(usage, fields) {
+  for (const field of fields) {
+    const raw = usage?.[field];
+    if (raw == null) continue;
+    const value = Number(raw);
+    if (Number.isFinite(value)) return toNonNegativeInt(value);
+  }
+  return 0;
+}
+
+// Shared implementation for the oh-my-pi session format. omp and omo both
+// persist it verbatim, so they differ only in where the sessions live, which
+// cursor namespace they own, and how reasoning tokens are spelled.
+async function parseOmpLikeIncremental({
   sessionFiles,
   subagentFiles,
   cursors,
@@ -14530,41 +14726,50 @@ async function parseOmpIncremental({
   onProgress,
   env,
   defaultModel,
+  stateKey,
+  source,
+  resolveSessionFiles,
+  resolveSubagentFiles,
+  resolveDefaultModel,
+  resolveFileCwd,
+  reasoningFields,
+  reasoningIncludedInOutput = false,
 } = {}) {
   await ensureDir(path.dirname(queuePath));
   const projectEnabled = typeof projectQueuePath === "string" && projectQueuePath.length > 0;
-  const ompState = cursors.omp && typeof cursors.omp === "object" ? cursors.omp : {};
-  const seenIds = new Set(Array.isArray(ompState.seenIds) ? ompState.seenIds : []);
+  const providerState =
+    cursors[stateKey] && typeof cursors[stateKey] === "object" ? cursors[stateKey] : {};
+  const seenIds = new Set(Array.isArray(providerState.seenIds) ? providerState.seenIds : []);
   const projectSeenIds = new Set(
-    Array.isArray(ompState.projectSeenIds) ? ompState.projectSeenIds : [],
+    Array.isArray(providerState.projectSeenIds) ? providerState.projectSeenIds : [],
   );
   const fileOffsets =
-    ompState.fileOffsets && typeof ompState.fileOffsets === "object"
-      ? { ...ompState.fileOffsets }
+    providerState.fileOffsets && typeof providerState.fileOffsets === "object"
+      ? { ...providerState.fileOffsets }
       : {};
   const projectFileOffsets =
-    ompState.projectFileOffsets && typeof ompState.projectFileOffsets === "object"
-      ? { ...ompState.projectFileOffsets }
+    providerState.projectFileOffsets && typeof providerState.projectFileOffsets === "object"
+      ? { ...providerState.projectFileOffsets }
       : {};
 
   const mainFiles = Array.isArray(sessionFiles)
     ? sessionFiles
-    : resolveOmpSessionFiles(env || process.env);
+    : resolveSessionFiles(env || process.env);
   // Subagent transcripts share the session format and count toward the same
-  // "omp" totals; they're discovered separately because they nest below the
+  // provider totals; they're discovered separately because they nest below the
   // cwd level. When the caller supplies explicit sessionFiles (tests), don't
   // auto-resolve — keep the parse hermetic.
   const subFiles = Array.isArray(subagentFiles)
     ? subagentFiles
     : Array.isArray(sessionFiles)
       ? []
-      : resolveOmpSubagentFiles(env || process.env);
+      : resolveSubagentFiles(env || process.env);
   const files = [...mainFiles, ...subFiles];
-  const fallbackModel = defaultModel || resolveOmpDefaultModel();
+  const fallbackModel = defaultModel || resolveDefaultModel();
 
   if (files.length === 0) {
-    cursors.omp = {
-      ...ompState,
+    cursors[stateKey] = {
+      ...providerState,
       seenIds: Array.from(seenIds),
       fileOffsets,
       ...(projectEnabled
@@ -14642,7 +14847,7 @@ async function parseOmpIncremental({
       const output = toNonNegativeInt(usage.output);
       const cacheRead = toNonNegativeInt(usage.cacheRead);
       const cacheWrite = toNonNegativeInt(usage.cacheWrite);
-      const reasoningTokens = toNonNegativeInt(usage.reasoningTokens);
+      const reasoningTokens = pickUsageInt(usage, reasoningFields);
 
       if (
         input === 0 &&
@@ -14675,10 +14880,12 @@ async function parseOmpIncremental({
       if (!bucketStart) continue;
 
       // Use provided totalTokens when available; otherwise sum all components.
+      // OmO folds reasoning into output, so the fallback must not add it again.
       const totalTokens =
         Number.isFinite(Number(usage.totalTokens)) && Number(usage.totalTokens) > 0
           ? toNonNegativeInt(usage.totalTokens)
-          : input + output + cacheRead + cacheWrite + reasoningTokens;
+          : input + output + cacheRead + cacheWrite +
+            (reasoningIncludedInOutput ? 0 : reasoningTokens);
 
       const model = normalizeModelInput(msg.model) || fallbackModel;
 
@@ -14692,9 +14899,9 @@ async function parseOmpIncremental({
         conversation_count: 1,
       };
 
-      const bucket = getHourlyBucket(hourlyState, "omp", model, bucketStart);
+      const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
       addTotals(bucket.totals, delta);
-      touchedBuckets.add(bucketKey("omp", model, bucketStart));
+      touchedBuckets.add(bucketKey(source, model, bucketStart));
       seenIds.add(entryId);
       eventsAggregated++;
 
@@ -14735,7 +14942,7 @@ async function parseOmpIncremental({
       const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
       if (stat.size <= startOffset) continue;
 
-      const cwd = await resolveOmpFileCwd(filePath);
+      const cwd = await resolveFileCwd(filePath);
       const projectContext = cwd
         ? await resolveProjectContextForPath({
             startDir: wsl.mapWslCwdToUnc(cwd, filePath),
@@ -14774,7 +14981,7 @@ async function parseOmpIncremental({
           const output = toNonNegativeInt(usage.output);
           const cacheRead = toNonNegativeInt(usage.cacheRead);
           const cacheWrite = toNonNegativeInt(usage.cacheWrite);
-          const reasoningTokens = toNonNegativeInt(usage.reasoningTokens);
+          const reasoningTokens = pickUsageInt(usage, reasoningFields);
           if (
             input === 0 &&
             output === 0 &&
@@ -14804,7 +15011,8 @@ async function parseOmpIncremental({
           const totalTokens =
             Number.isFinite(Number(usage.totalTokens)) && Number(usage.totalTokens) > 0
               ? toNonNegativeInt(usage.totalTokens)
-              : input + output + cacheRead + cacheWrite + reasoningTokens;
+              : input + output + cacheRead + cacheWrite +
+                (reasoningIncludedInOutput ? 0 : reasoningTokens);
           const delta = {
             input_tokens: input,
             cached_input_tokens: cacheRead,
@@ -14817,12 +15025,12 @@ async function parseOmpIncremental({
           const projectBucket = getProjectBucket(
             projectState,
             projectKey,
-            "omp",
+            source,
             bucketStart,
             projectRef,
           );
           addTotals(projectBucket.totals, delta);
-          projectTouchedBuckets.add(projectBucketKey(projectKey, "omp", bucketStart));
+          projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
           projectSeenIds.add(entryId);
         }
       }
@@ -14867,8 +15075,8 @@ async function parseOmpIncremental({
     projectState.updatedAt = updatedAt;
     cursors.projectHourly = projectState;
   }
-  cursors.omp = {
-    ...ompState,
+  cursors[stateKey] = {
+    ...providerState,
     seenIds: cappedSeen,
     fileOffsets,
     ...(projectEnabled
@@ -14881,6 +15089,33 @@ async function parseOmpIncremental({
   };
 
   return { recordsProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
+}
+
+async function parseOmpIncremental(options = {}) {
+  return parseOmpLikeIncremental({
+    ...options,
+    stateKey: "omp",
+    source: "omp",
+    resolveSessionFiles: resolveOmpSessionFiles,
+    resolveSubagentFiles: resolveOmpSubagentFiles,
+    resolveDefaultModel: resolveOmpDefaultModel,
+    resolveFileCwd: resolveOmpFileCwd,
+    reasoningFields: ["reasoningTokens"],
+  });
+}
+
+async function parseOmoIncremental(options = {}) {
+  return parseOmpLikeIncremental({
+    ...options,
+    stateKey: "omo",
+    source: "omo",
+    resolveSessionFiles: resolveOmoSessionFiles,
+    resolveSubagentFiles: resolveOmoSubagentFiles,
+    resolveDefaultModel: resolveOmoDefaultModel,
+    resolveFileCwd: resolveOmoFileCwd,
+    reasoningFields: ["reasoningTokens", "reasoning"],
+    reasoningIncludedInOutput: true,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14931,6 +15166,13 @@ function piAgentDirCollidesWithOmp(env = process.env) {
   const ompAgentDir = resolveOmpAgentDir(env);
   if (!piAgentDir || !ompAgentDir) return false;
   return path.resolve(piAgentDir) === path.resolve(ompAgentDir);
+}
+
+function omoAgentDirCollidesWithOmp(env = process.env) {
+  const omoAgentDir = resolveOmoAgentDir(env);
+  const ompAgentDir = resolveOmpAgentDir(env);
+  if (!omoAgentDir || !ompAgentDir) return false;
+  return path.resolve(omoAgentDir) === path.resolve(ompAgentDir);
 }
 
 function resolvePiSessionFiles(env = process.env) {
@@ -21699,6 +21941,12 @@ module.exports = {
   resolveOmpSubagentFiles,
   resolveOmpDefaultModel,
   parseOmpIncremental,
+  resolveOmoHome,
+  resolveOmoAgentDir,
+  resolveOmoSessionFiles,
+  resolveOmoSubagentFiles,
+  resolveOmoDefaultModel,
+  parseOmoIncremental,
   resolveKilocodeRoots,
   resolveKilocodeTaskFiles,
   normalizeKilocodeProviderToModel,
@@ -21752,6 +22000,7 @@ module.exports = {
   resolvePiDefaultModel,
   parsePiIncremental,
   piAgentDirCollidesWithOmp,
+  omoAgentDirCollidesWithOmp,
   resolvePrimeAgentHome,
   resolvePrimeAgentDir,
   resolvePrimeAgentSessionFiles,

@@ -59,6 +59,8 @@ const {
   resolveWorkbuddyProjectFiles,
   resolveOmpSessionFiles,
   resolveOmpAgentDir,
+  resolveOmoSessionFiles,
+  resolveOmoAgentDir,
   resolvePiSessionFiles,
   resolvePiAgentDir,
   piAgentDirCollidesWithOmp,
@@ -450,6 +452,11 @@ async function cmdStatus(argv = []) {
   const ompInstalled = Boolean(ompAgentDir) && fssync.existsSync(path.join(ompAgentDir, "sessions"));
   const ompFiles = ompInstalled ? resolveOmpSessionFiles(process.env) : [];
   const ompHookState = await probeOmpHookState({ home, trackerDir, env: process.env });
+
+  // OmO — passive scan only (no hooks).
+  const omoAgentDir = resolveOmoAgentDir(process.env);
+  const omoInstalled = Boolean(omoAgentDir) && fssync.existsSync(path.join(omoAgentDir, "sessions"));
+  const omoFiles = omoInstalled ? resolveOmoSessionFiles(process.env) : [];
 
   // pi (@mariozechner/pi-coding-agent) — passive scan only (no hooks).
   // Skip when its agent dir collides with omp's; sync would dedupe anyway.
@@ -986,6 +993,9 @@ async function cmdStatus(argv = []) {
               notify_extension_path: ompHookState.extensionPath || null,
             }
           : { installed: false },
+        omo: omoInstalled
+          ? { installed: true, files: omoFiles.length }
+          : { installed: false },
         pi: piInstalled
           ? { installed: true, files: piFiles.length }
           : { installed: false },
@@ -1151,6 +1161,9 @@ async function cmdStatus(argv = []) {
         : null,
       ompInstalled || ompHookState.ompPresent
         ? `- oh-my-pi: passive reader (${ompFiles.length} session jsonl file${ompFiles.length !== 1 ? "s" : ""} found${ompHookState.configured ? ", notify extension: yes" : ", notify extension: no"})`
+        : null,
+      omoInstalled
+        ? `- OmO: passive reader (${omoFiles.length} session jsonl file${omoFiles.length !== 1 ? "s" : ""} found)`
         : null,
       piInstalled
         ? `- pi: passive reader (${piFiles.length} session jsonl file${piFiles.length !== 1 ? "s" : ""} found)`

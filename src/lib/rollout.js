@@ -21552,6 +21552,17 @@ function resolveDshHome(env = process.env) {
 // DSH home overrides authoritative: an override is a complete user choice, not
 // one half of an automatic native/WSL discovery pair.
 function resolveDshHomes(env = process.env, deps = {}) {
+  if (deps.trackerDir || deps.configPath || deps.dshRootsState) {
+    const state = deps.dshRootsState || require("./dsh-roots").resolveDshRootsSync({
+      home: deps.home || os.homedir(),
+      env,
+      trackerDir: deps.trackerDir,
+      configPath: deps.configPath,
+      platform: deps.platform || process.platform,
+      discoverWslHome: deps.discoverWslHome,
+    });
+    return state.roots.map((root) => root.path);
+  }
   const overridden = Boolean(
     (typeof env?.TOKENTRACKER_DSH_HOME === "string" && env.TOKENTRACKER_DSH_HOME.trim()) ||
     (typeof env?.DSH_HOME === "string" && env.DSH_HOME.trim()),
@@ -21596,7 +21607,9 @@ function parseDshVersion(name) {
 async function resolveDshSessionFiles(env = process.env, deps = {}) {
   const out = [];
   const seen = new Set();
-  for (const dshHome of resolveDshHomes(env, deps)) {
+  const rootRecords = deps.dshRootsState?.roots || resolveDshHomes(env, deps).map((root) => ({ path: root }));
+  for (const rootRecord of rootRecords) {
+    const dshHome = rootRecord.path;
     const sessionsRoot = path.join(dshHome, "sessions");
     const projects = await safeReadDir(sessionsRoot);
     for (const project of projects) {
@@ -21641,12 +21654,12 @@ async function resolveDshSessionFiles(env = process.env, deps = {}) {
         }
         if (selected && !seen.has(selected)) {
           seen.add(selected);
-          out.push(selected);
+          out.push(deps.withRootMetadata ? { path: selected, statsSource: rootRecord.stats_source || DSH_SOURCE } : selected);
         }
       }
     }
   }
-  out.sort((a, b) => a.localeCompare(b));
+  if (!deps.withRootMetadata) out.sort((a, b) => a.localeCompare(b));
   return out;
 }
 
@@ -21938,10 +21951,10 @@ function dshContributionsCoverPrior(prior, candidate) {
   return true;
 }
 
-function dshContributionsFitHourlyState(hourlyState, contributions) {
+function dshContributionsFitHourlyState(hourlyState, contributions, source = DSH_SOURCE) {
   for (const contribution of Object.values(contributions || {})) {
     if (!contribution?.model || !contribution.bucketStart || !contribution.totals) continue;
-    const key = bucketKey(DSH_SOURCE, contribution.model, contribution.bucketStart);
+    const key = bucketKey(source, contribution.model, contribution.bucketStart);
     const bucket = hourlyState?.buckets?.[key];
     if (!bucket?.totals) return false;
     for (const field of [
@@ -21965,18 +21978,18 @@ function dshContributionsFitHourlyState(hourlyState, contributions) {
   return true;
 }
 
-function applyDshContributions({ hourlyState, touchedBuckets, contributions, subtract = false }) {
+function applyDshContributions({ hourlyState, touchedBuckets, contributions, source = DSH_SOURCE, subtract = false }) {
   for (const contribution of Object.values(contributions || {})) {
     if (!contribution?.model || !contribution.bucketStart || !contribution.totals) continue;
     const bucket = getHourlyBucket(
       hourlyState,
-      DSH_SOURCE,
+      source,
       contribution.model,
       contribution.bucketStart,
     );
     if (subtract) subtractTotals(bucket.totals, contribution.totals);
     else addTotals(bucket.totals, contribution.totals);
-    touchedBuckets.add(bucketKey(DSH_SOURCE, contribution.model, contribution.bucketStart));
+    touchedBuckets.add(bucketKey(source, contribution.model, contribution.bucketStart));
   }
 }
 
@@ -22420,9 +22433,12 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
   const deferredMigrationPaths = new Map();
   const cb = typeof onProgress === "function" ? onProgress : null;
 
-  const files = Array.isArray(sessionFiles)
-    ? sessionFiles.filter((filePath) => typeof filePath === "string")
+  const fileEntries = Array.isArray(sessionFiles)
+    ? sessionFiles.map((entry) => typeof entry === "string" ? { path: entry, statsSource: DSH_SOURCE } : entry)
+      .filter((entry) => typeof entry?.path === "string")
     : [];
+  const files = fileEntries.map((entry) => entry.path);
+  const statsSourceByPath = new Map(fileEntries.map((entry) => [entry.path, entry.statsSource || DSH_SOURCE]));
   const presentFiles = new Set(files);
   const total = files.length;
   const deferredFilePaths = new Set();
@@ -22475,7 +22491,9 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
 
   for (let idx = 0; idx < files.length; idx++) {
     const filePath = files[idx];
+    const statsSource = statsSourceByPath.get(filePath) || DSH_SOURCE;
     const prev = fileState[filePath] || null;
+    const previousStatsSource = typeof prev?.statsSource === "string" ? prev.statsSource : DSH_SOURCE;
     const previousSessionId = typeof prev?.sessionId === "string" ? prev.sessionId : null;
     const previousSession = previousSessionId ? sessionState[previousSessionId] : null;
     const previousFileContributions = storedDshContributions(prev);
@@ -22483,6 +22501,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
     const needsLedgerBackfill = Boolean(
       previousSessionId && !previousSessionContributions && !previousFileContributions,
     );
+    const needsSourceMigration = Boolean(prev && previousStatsSource !== statsSource);
     let snapshot;
     let parsed;
     let fullParsed = null;
@@ -22491,7 +22510,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
 
     try {
       snapshot = await readDshSessionSnapshot(filePath, {
-        previous: needsLedgerBackfill ? null : prev,
+        previous: needsLedgerBackfill || needsSourceMigration ? null : prev,
       });
       if (!snapshot) {
         // A resolver-selected replacement can disappear between discovery and
@@ -22502,7 +22521,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
         reportProgress(idx, recordsProcessed, eventsAggregated, total);
         continue;
       }
-      if (snapshot.unchanged && !needsLedgerBackfill) {
+      if (snapshot.unchanged && !needsLedgerBackfill && !needsSourceMigration) {
         reportProgress(idx, recordsProcessed, eventsAggregated, total);
         continue;
       }
@@ -22523,7 +22542,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
           )
         ),
       );
-      const lastSeq = fileReset || !Number.isFinite(prev?.lastSeq) ? -1 : prev.lastSeq;
+      const lastSeq = fileReset || needsSourceMigration || !Number.isFinite(prev?.lastSeq) ? -1 : prev.lastSeq;
       parsed = extractDshSessionUsage(snapshot.text, lastSeq);
       sessionChanged = Boolean(
         prev &&
@@ -22531,7 +22550,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
         parsed.sessionId !== previousSessionId,
       );
       if (sessionChanged) parsed = extractDshSessionUsage(snapshot.text, -1);
-      if (!prev || needsLedgerBackfill || sessionChanged || fileReset) {
+      if (!prev || needsLedgerBackfill || needsSourceMigration || sessionChanged || fileReset) {
         fullParsed = extractDshSessionUsage(snapshot.text, -1);
         if (!prev || sessionChanged || fileReset) parsed = fullParsed;
       }
@@ -22563,6 +22582,13 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
       continue;
     }
     const session = sessionId ? sessionState[sessionId] : null;
+    if (sessionId && session?.lastPath && session.lastPath !== filePath && presentFiles.has(session.lastPath)) {
+      reportProgress(idx, recordsProcessed, eventsAggregated, total);
+      continue;
+    }
+    const oldStatsSource = typeof session?.statsSource === "string"
+      ? session.statsSource
+      : previousStatsSource;
     const stalePath = staleFileForSession(sessionId, filePath);
     const previousPath =
       session?.lastPath && session.lastPath !== filePath ? session.lastPath : stalePath;
@@ -22606,7 +22632,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
     const replaceSession = Boolean(
       sessionId &&
       oldContributions &&
-      (!prev || resetCurrentFile || (previousPath && previousPath !== filePath)),
+      (!prev || resetCurrentFile || needsSourceMigration || (previousPath && previousPath !== filePath)),
     );
     const oldContributionCount = Object.keys(oldContributions || {}).length;
     if (sessionId && replacementPath && !oldContributions) {
@@ -22646,7 +22672,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
       reportProgress(idx, recordsProcessed, eventsAggregated, total);
       continue;
     }
-    if (replaceSession && !dshContributionsFitHourlyState(hourlyState, oldContributions)) {
+    if (replaceSession && !dshContributionsFitHourlyState(hourlyState, oldContributions, oldStatsSource)) {
       // Never let subtractTotals clamp away another session's history when the
       // persisted ledger and hourly bucket disagree. Defer for a repairable,
       // visible retry instead.
@@ -22662,6 +22688,7 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
         hourlyState,
         touchedBuckets,
         contributions: oldContributions,
+        source: oldStatsSource,
         subtract: true,
       });
       if (previousPath && !presentFiles.has(previousPath)) delete fileState[previousPath];
@@ -22677,9 +22704,9 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
     for (const delta of parsed.deltas) {
       const bucketStart = toUtcHalfHourStart(delta.timeMs);
       if (!bucketStart) continue;
-      const bucket = getHourlyBucket(hourlyState, DSH_SOURCE, delta.model, bucketStart);
+      const bucket = getHourlyBucket(hourlyState, statsSource, delta.model, bucketStart);
       addTotals(bucket.totals, delta.totals);
-      touchedBuckets.add(bucketKey(DSH_SOURCE, delta.model, bucketStart));
+      touchedBuckets.add(bucketKey(statsSource, delta.model, bucketStart));
       if (!fullParsed) addDshContribution(nextContributions, delta.model, bucketStart, delta.totals);
       eventsAggregated += 1;
     }
@@ -22692,12 +22719,14 @@ async function parseDshIncremental({ sessionFiles, cursors, queuePath, onProgres
       sessionId,
       lastSeq: parsed.maxSeq,
       contributions: nextContributions,
+      statsSource,
       updatedAt,
     };
     if (sessionId) {
       sessionState[sessionId] = {
         lastPath: filePath,
         contributions: nextContributions,
+        statsSource,
         updatedAt,
       };
     }

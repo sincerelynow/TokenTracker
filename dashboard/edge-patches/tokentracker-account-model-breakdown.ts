@@ -723,6 +723,16 @@ export default async function (req: Request): Promise<Response> {
       instance_label: labelKey.replace(/-/g, "_").toUpperCase(),
     };
   };
+  const dshRootMetadata = (source: string) => {
+    if (!source.startsWith("dsh-root:")) return null;
+    const key = source.slice("dsh-root:".length);
+    const labelKey = key.replace(/-[0-9a-f]{8}$/i, "") || "dsh";
+    return {
+      provider_family: "dsh",
+      instance_key: key,
+      instance_label: labelKey.replace(/-/g, "_").toUpperCase(),
+    };
+  };
 
   const newTotals = (): Totals => ({
     total_tokens: 0,
@@ -805,6 +815,7 @@ export default async function (req: Request): Promise<Response> {
     return {
       source: s.source,
       ...(s.source === "codex" ? { provider_family: "codex" } : codexRootMetadata(s.source) || {}),
+      ...(s.source === "dsh" ? { provider_family: "dsh" } : dshRootMetadata(s.source) || {}),
       totals: { ...s.totals, total_cost_usd: sourceCost.toFixed(6) },
       models,
     };

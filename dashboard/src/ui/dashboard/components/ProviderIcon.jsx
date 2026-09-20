@@ -498,6 +498,8 @@ export function ProviderIcon({ provider, size = 16, color, className = "" }) {
   const rawNormalized = provider?.toUpperCase?.() || "";
   const normalized = rawNormalized === "CODEX ALL" || rawNormalized.startsWith("CODEX_") || rawNormalized.startsWith("CODEX-ROOT:")
     ? "CODEX"
+    : rawNormalized === "DSH ALL" || rawNormalized.startsWith("DSH_") || rawNormalized.startsWith("DSH-ROOT:")
+      ? "DSH"
     : rawNormalized;
   const logoKey = piAwareLogoKey(normalized);
   const logoSrc = PROVIDER_LOGO_MAP[logoKey];

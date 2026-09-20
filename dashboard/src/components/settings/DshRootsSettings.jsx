@@ -1,0 +1,16 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { FolderPlus, Save, Trash2 } from "lucide-react";
+import { copy } from "../../lib/copy";
+import { Button } from "../../ui/components";
+import { SectionCard } from "./Controls.jsx";
+export function DshRootsSettings({ rootsState }) {
+  const { roots, saving, error, max_roots: maxRoots = 16, save } = rootsState;
+  const [drafts, setDrafts] = useState(() => (roots || []).map((r) => ({ path: r.path })));
+  const [saved, setSaved] = useState(false);
+  useEffect(() => setDrafts((roots || []).map((r) => ({ path: r.path }))), [roots]);
+  const duplicateIndexes = useMemo(() => { const seen = new Map(), out = new Set(); drafts.forEach((r, i) => { const key = r.path.trim().replace(/[\\/]+$/, "").toLowerCase(); if (!key) return; if (seen.has(key)) { out.add(seen.get(key)); out.add(i); } else seen.set(key, i); }); return out; }, [drafts]);
+  const submit = async () => { setSaved(false); try { await save(drafts); setSaved(true); } catch {} };
+  return <SectionCard title={copy("settings.dsh_roots.title")} subtitle={copy("settings.dsh_roots.subtitle")} action={<Button type="button" size="sm" variant="secondary" onClick={() => setDrafts((v) => [...v, { path: "" }])} disabled={saving || drafts.length >= maxRoots}><FolderPlus className="mr-1.5 h-4 w-4" aria-hidden />{copy("settings.dsh_roots.add")}</Button>}>
+    <div className="space-y-3 py-3">{drafts.map((value, index) => <div key={index} className="flex min-w-0 items-start gap-2"><div className="min-w-0 flex-1"><input value={value.path} onChange={(e) => { setSaved(false); setDrafts((v) => v.map((x, i) => i === index ? { ...x, path: e.target.value } : x)); }} aria-label={copy("settings.dsh_roots.path", { index: index + 1 })} placeholder={copy("settings.dsh_roots.placeholder")} className="h-9 w-full rounded-md border border-oai-gray-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-inset focus:ring-oai-brand-500" /><p className={`mt-1 text-xs ${duplicateIndexes.has(index) ? "text-red-600" : "text-oai-gray-500"}`}>{duplicateIndexes.has(index) ? copy("settings.dsh_roots.duplicate") : roots?.find((r) => r.path === value.path)?.has_sessions ? copy("settings.dsh_roots.detected") : copy("settings.dsh_roots.not_detected")}</p></div><button type="button" onClick={() => setDrafts((v) => v.filter((_, i) => i !== index))} disabled={saving || drafts.length <= 1} aria-label={copy("settings.dsh_roots.remove", { index: index + 1 })} title={copy("settings.dsh_roots.remove", { index: index + 1 })} className="inline-flex h-9 w-9 items-center justify-center rounded-md border"><Trash2 className="h-4 w-4" aria-hidden /></button></div>)}<div className="flex items-center justify-end gap-3 pt-1">{error ? <p role="alert" className="min-w-0 flex-1 text-xs text-red-600">{copy("settings.dsh_roots.error", { error: error.message })}</p> : null}{saved ? <p role="status" className="text-xs text-emerald-600">{copy("settings.dsh_roots.saved")}</p> : null}<Button type="button" size="sm" onClick={submit} disabled={saving || drafts.some((v) => !v.path.trim()) || duplicateIndexes.size > 0}><Save className="mr-1.5 h-4 w-4" aria-hidden />{saving ? copy("settings.dsh_roots.saving") : copy("settings.dsh_roots.save")}</Button></div></div>
+  </SectionCard>;
+}

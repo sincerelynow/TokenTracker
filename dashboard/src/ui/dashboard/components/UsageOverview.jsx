@@ -93,6 +93,7 @@ const PROVIDER_COLORS = {
 function getProviderColor(label, index) {
   const normalized = label?.toUpperCase?.() || "";
   if (normalized.startsWith("CODEX")) return PROVIDER_COLORS.CODEX;
+  if (normalized.startsWith("DSH")) return PROVIDER_COLORS.DSH;
   return PROVIDER_COLORS[normalized] || `hsl(${150 + index * 40}, 60%, 45%)`;
 }
 
@@ -334,11 +335,13 @@ export function UsageOverview({
   // FleetData is already grouped by provider.
   const providers = fleetData.filter((f) => f.models?.length > 0 && !f.isHiddenProvider);
   const meteredProviders = fleetData.filter((provider) => !provider.isSyntheticAggregate);
-  const hasCodexAggregate = providers.some((provider) => provider.isSyntheticAggregate);
+  const aggregateFamilies = new Set(providers
+    .filter((provider) => provider.isSyntheticAggregate)
+    .map((provider) => String(provider.source || "").replace(/-all$/i, "").toLowerCase()));
   const distributionProviders = providers.filter((provider) => {
-    if (!hasCodexAggregate) return !provider.isSyntheticAggregate;
     const source = String(provider.source || "").toLowerCase();
-    return provider.isSyntheticAggregate || !source.startsWith("codex-root:");
+    if (provider.isSyntheticAggregate) return true;
+    return ![...aggregateFamilies].some((family) => source.startsWith(`${family}-root:`));
   });
   // Devin contributes real token counts but its models (swe-2, swe-2-high,
   // compactor) ship without pricing data, so the dollar figure silently
@@ -673,7 +676,7 @@ export function UsageOverview({
                         color={color}
                         providerHeading={providerHeading}
                         contextSource={contextSource}
-                        contextRequestSource={provider.isSyntheticAggregate ? "codex" : provider.source}
+                        contextRequestSource={provider.isSyntheticAggregate ? String(provider.source).replace(/-all$/i, "") : provider.source}
                         from={from}
                         to={to}
                         sortedModels={sortedModels}

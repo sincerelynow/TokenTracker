@@ -1,6 +1,7 @@
 "use strict";
 
 const { canonicalUsageSource } = require("./codex-source");
+const { canonicalDshSource } = require("./dsh-source");
 
 /**
  * Wrapped aggregator — turns a list of queue.jsonl rows into a year-end
@@ -129,7 +130,7 @@ function aggregateWrapped(rows, opts = {}) {
     totalTokens += t;
     if (isFiniteNumber(row.conversation_count)) totalConvs += row.conversation_count;
     if (row.source) {
-      const source = canonicalUsageSource(row.source);
+      const source = canonicalDshSource(canonicalUsageSource(row.source));
       tokensBySource.set(source, (tokensBySource.get(source) || 0) + t);
     }
     if (row.model) tokensByModel.set(row.model, (tokensByModel.get(row.model) || 0) + t);

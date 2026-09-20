@@ -604,5 +604,19 @@
   "settings.codex_roots.saving": "Wird gespeichert...",
   "settings.codex_roots.saved": "Codex-Scanverzeichnisse gespeichert.",
   "settings.codex_roots.error": "Codex-Verzeichnisse konnten nicht gespeichert werden: {{error}}",
-  "usage.overview.codex_all": "CODEX ALL"
+  "usage.overview.codex_all": "CODEX ALL",
+  "settings.dsh_roots.title": "DeepSeek-Harness-Scanverzeichnisse",
+  "settings.dsh_roots.subtitle": "Wähle die lokalen DeepSeek-Harness-Verzeichnisse für den Sitzungs-Scan. Änderungen gelten ab der nächsten Synchronisierung.",
+  "settings.dsh_roots.add": "Verzeichnis hinzufügen",
+  "settings.dsh_roots.path": "DeepSeek-Harness-Verzeichnis {{index}}",
+  "settings.dsh_roots.placeholder": "Zum Beispiel: ~/.dsh",
+  "settings.dsh_roots.remove": "DeepSeek-Harness-Verzeichnis {{index}} entfernen",
+  "settings.dsh_roots.duplicate": "Dieses Verzeichnis ist bereits aufgeführt.",
+  "settings.dsh_roots.detected": "Sitzungen erkannt",
+  "settings.dsh_roots.not_detected": "Noch keine Sitzungen erkannt",
+  "settings.dsh_roots.save": "Verzeichnisse speichern",
+  "settings.dsh_roots.saving": "Wird gespeichert...",
+  "settings.dsh_roots.saved": "DeepSeek-Harness-Scanverzeichnisse gespeichert.",
+  "settings.dsh_roots.error": "DeepSeek-Harness-Verzeichnisse konnten nicht gespeichert werden: {{error}}",
+  "usage.overview.dsh_all": "DSH ALL"
 }

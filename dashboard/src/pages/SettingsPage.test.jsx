@@ -36,6 +36,17 @@ const codexRootsMock = vi.hoisted(() => ({
   error: null,
   save: vi.fn(),
 }));
+const dshRootsMock = vi.hoisted(() => ({
+  available: false,
+  loading: false,
+  saving: false,
+  roots: [],
+  configured: false,
+  source: "default",
+  max_roots: 16,
+  error: null,
+  save: vi.fn(),
+}));
 
 const LABELS = {
   "settings.page.title": "Settings",
@@ -106,6 +117,9 @@ vi.mock("../hooks/use-integrations.js", () => ({
 
 vi.mock("../hooks/use-codex-roots.js", () => ({
   useCodexRoots: () => codexRootsMock,
+}));
+vi.mock("../hooks/use-dsh-roots.js", () => ({
+  useDshRoots: () => dshRootsMock,
 }));
 
 vi.mock("../components/settings/AppearanceSection.jsx", () => ({

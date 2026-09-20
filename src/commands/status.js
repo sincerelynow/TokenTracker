@@ -111,6 +111,7 @@ const wsl = require("../lib/wsl-probe");
 const { getWslMode, isInvalidWslMode, shouldProbeWsl, discoverWslHome } = wsl;
 const { resolveInstallPaths, resolveZcodeNativeDbPath } = require("../lib/install-resolver");
 const { resolveCodexRootsSync } = require("../lib/codex-roots");
+const { resolveDshRootsSync } = require("../lib/dsh-roots");
 const { probeGrokHookState, resolveGrokHome } = require("../lib/grok-hook");
 const { probeOmpHookState } = require("../lib/omp-hook");
 
@@ -699,9 +700,10 @@ async function cmdStatus(argv = []) {
   const droidSessionsDir = resolveDroidSessionsDir(process.env);
   const droidSettingsFiles = listDroidSettingsFiles(process.env);
   const droidInstalled = droidSettingsFiles.length > 0;
-  const dshHomes = resolveDshHomes(process.env);
+  const dshRootState = resolveDshRootsSync({ home: os.homedir(), trackerDir, env: process.env });
+  const dshHomes = dshRootState.roots.map((root) => root.path);
   const dshSessionsDir = dshHomes.map((homeDir) => path.join(homeDir, "sessions")).join(", ");
-  const dshSessionFiles = await resolveDshSessionFiles(process.env);
+  const dshSessionFiles = await resolveDshSessionFiles(process.env, { trackerDir });
   const dshInstalled = dshSessionFiles.length > 0;
   const lmstudioHome = resolveLmstudioHome(process.env);
   const lmstudioLogFiles = await resolveLmstudioLogFiles(process.env);

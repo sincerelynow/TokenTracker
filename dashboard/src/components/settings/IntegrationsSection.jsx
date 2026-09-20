@@ -5,9 +5,10 @@ import { copy } from "../../lib/copy";
 import { Button, ConfirmModal } from "../../ui/components";
 import { SectionCard, SettingsRow } from "./Controls.jsx";
 import { CodexRootsSettings } from "./CodexRootsSettings.jsx";
+import { DshRootsSettings } from "./DshRootsSettings.jsx";
 import { emitLocalUsageSynced } from "../../lib/integrations-api";
 
-export function IntegrationsSection({ integrationState, codexRootsState = null }) {
+export function IntegrationsSection({ integrationState, codexRootsState = null, dshRootsState = null }) {
   const { integrations, error, pendingProvider, mutate, refresh = async () => {} } = integrationState;
   const [uninstallTarget, setUninstallTarget] = useState(null);
   const [syncState, setSyncState] = useState("idle");
@@ -87,6 +88,7 @@ export function IntegrationsSection({ integrationState, codexRootsState = null }
       </SectionCard>
 
       {codexRootsState?.available ? <CodexRootsSettings rootsState={codexRootsState} /> : null}
+      {dshRootsState?.available ? <DshRootsSettings rootsState={dshRootsState} /> : null}
 
       <ConfirmModal
         open={Boolean(uninstallTarget)}

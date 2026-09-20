@@ -18,6 +18,7 @@ import { LIMIT_DISPLAY_MODES, useLimitsDisplayPrefs } from "../hooks/use-limits-
 import { useNativeSettings } from "../hooks/use-native-settings.js";
 import { useIntegrations } from "../hooks/use-integrations.js";
 import { useCodexRoots } from "../hooks/use-codex-roots.js";
+import { useDshRoots } from "../hooks/use-dsh-roots.js";
 import { useProxySettings } from "../hooks/use-proxy-settings.js";
 import { cn } from "../lib/cn";
 import { copy } from "../lib/copy";
@@ -62,6 +63,7 @@ export function SettingsPage() {
   const proxySettings = useProxySettings();
   const integrations = useIntegrations();
   const codexRoots = useCodexRoots();
+  const dshRoots = useDshRoots();
   const { available: proxySettingsAvailable } = proxySettings;
   const toastOnReset = nativeSettings?.toastOnReset !== false;
   const confettiOnReset = nativeSettings?.confettiOnReset !== false;
@@ -126,7 +128,7 @@ export function SettingsPage() {
           description: copy("settings.integrations.subtitle"),
           group: SETTINGS_GROUP_IDS.APP,
           Icon: Plug,
-          content: <IntegrationsSection integrationState={integrations} codexRootsState={codexRoots} />,
+          content: <IntegrationsSection integrationState={integrations} codexRootsState={codexRoots} dshRootsState={dshRoots} />,
         }]
       : []),
     {

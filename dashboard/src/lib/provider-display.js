@@ -62,6 +62,11 @@ export function formatProviderDisplayName(value) {
     const key = raw.slice(raw.indexOf(":") + 1).replace(/-[0-9a-f]{8}$/i, "");
     return (key || "codex").replace(/-/g, "_").toUpperCase();
   }
+  if (/^dsh[-_ ]all$/i.test(raw)) return copy("usage.overview.dsh_all");
+  if (/^dsh-root:/i.test(raw)) {
+    const key = raw.slice(raw.indexOf(":") + 1).replace(/-[0-9a-f]{8}$/i, "");
+    return (key || "dsh").replace(/-/g, "_").toUpperCase();
+  }
 
   const normalized = normalizedProviderKey(raw);
   if (normalized === "primeagent") return "Prime Agent";

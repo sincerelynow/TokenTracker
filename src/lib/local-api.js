@@ -17,6 +17,7 @@ const {
   codexRootLabelFromKey,
   isCodexSource,
 } = require("./codex-source");
+const { dshRootKeyFromSource, dshRootLabelFromKey, isDshSource } = require("./dsh-source");
 
 const SYNC_TIMEOUT_MS = 120_000;
 // A failed account-view request should not stall every dashboard refresh
@@ -2167,6 +2168,38 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // --- DeepSeek Harness scan roots (local Dashboard only) ---
+    if (p === "/functions/tokentracker-dsh-roots") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method !== "GET" && method !== "POST") {
+        json(res, { ok: false, error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      if (!isAuthorizedLocalMutation(req)) {
+        json(res, { ok: false, error: "Unauthorized" }, 401);
+        return true;
+      }
+      const rootsManager = require("./dsh-roots");
+      const options = { home: os.homedir(), trackerDir: path.dirname(qp), env: process.env };
+      try {
+        if (method === "GET") {
+          json(res, { ok: true, ...rootsManager.resolveDshRootsSync(options) });
+          return true;
+        }
+        let body;
+        try { body = await readJsonBody(req); } catch {
+          json(res, { ok: false, error: "invalid JSON" }, 400);
+          return true;
+        }
+        const result = await rootsManager.saveDshRoots(body?.roots, options);
+        json(res, { ok: true, ...result });
+      } catch (error) {
+        const status = String(error?.code || "").startsWith("DSH_ROOTS_") ? 400 : 500;
+        json(res, { ok: false, error: error?.message || "DSH roots operation failed", code: error?.code || "DSH_ROOTS_OPERATION_FAILED" }, status);
+      }
+      return true;
+    }
+
     // --- wrapped (year-end summary, à la Spotify Wrapped) ---
     if (p === "/functions/tokentracker-wrapped") {
       const yearParam = url.searchParams.get("year");
@@ -2446,6 +2479,7 @@ function createLocalApiHandler({ queuePath }) {
       });
 
       let codexRootLabels = new Map();
+      let dshRootLabels = new Map();
       try {
         const rootState = require("./codex-roots").resolveCodexRootsSync({
           home: os.homedir(),
@@ -2456,19 +2490,31 @@ function createLocalApiHandler({ queuePath }) {
       } catch {
         codexRootLabels = new Map();
       }
+      try {
+        const rootState = require("./dsh-roots").resolveDshRootsSync({ home: os.homedir(), trackerDir: path.dirname(qp), env: process.env });
+        dshRootLabels = new Map(rootState.roots.map((root) => [root.key, root.label]));
+      } catch {
+        dshRootLabels = new Map();
+      }
       const bySource = new Map();
       for (const row of rows) {
         const src = row.source || "unknown";
         const mdl = row.model || "unknown";
         if (!bySource.has(src)) {
           const instanceKey = codexRootKeyFromSource(src);
+          const dshInstanceKey = dshRootKeyFromSource(src);
           bySource.set(src, {
             source: src,
             source_scope: getSourceScope(src),
             ...(isCodexSource(src) ? { provider_family: "codex" } : {}),
+            ...(isDshSource(src) ? { provider_family: "dsh" } : {}),
             ...(instanceKey ? {
               instance_key: instanceKey,
               instance_label: codexRootLabels.get(instanceKey) || codexRootLabelFromKey(instanceKey),
+            } : {}),
+            ...(dshInstanceKey ? {
+              instance_key: dshInstanceKey,
+              instance_label: dshRootLabels.get(dshInstanceKey) || dshRootLabelFromKey(dshInstanceKey),
             } : {}),
             totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" },
             models: new Map(),

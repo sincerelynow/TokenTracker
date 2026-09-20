@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { canonicalUsageSource, isCodexSource } = require("../codex-source");
+const { canonicalDshSource } = require("../dsh-source");
 
 const curatedOverrides = require("./curated-overrides.json");
 const {
@@ -164,7 +165,7 @@ function isDeepSeekOffPeak(row) {
 }
 
 function getRowPricing(row) {
-  const source = canonicalUsageSource(row?.source);
+  const source = canonicalDshSource(canonicalUsageSource(row?.source));
   const pricing = getModelPricing(row?.model, { source });
   // AStudio uses iFlytek MaaS fixed prices and does not inherit DeepSeek public API
   // time-based discounts.

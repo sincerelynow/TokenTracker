@@ -35,6 +35,16 @@ describe("buildFleetData", () => {
     expect(fleet[0].label).toBe("CODEX");
   });
 
+  it("builds DSH root cards plus a non-metered DSH ALL aggregate", () => {
+    const fleet = buildFleetData({ sources: [
+      { source: "dsh-root:dsh-12345678", instance_label: "DSH", totals: { billable_total_tokens: 100, total_cost_usd: "1" }, models: [{ model_id: "deepseek-flash", totals: { billable_total_tokens: 100, total_cost_usd: "1" } }] },
+      { source: "dsh-root:starnetai-dsh-home-87654321", instance_label: "STARNETAI_DSH_HOME", totals: { billable_total_tokens: 200, total_cost_usd: "2" }, models: [{ model_id: "deepseek-pro", totals: { billable_total_tokens: 200, total_cost_usd: "2" } }] },
+    ] }, { copyFn: (key: string) => key === "usage.overview.dsh_all" ? "DSH ALL" : key });
+    expect(fleet.map((entry: any) => entry.label)).toEqual(["DSH ALL", "STARNETAI_DSH_HOME", "DSH"]);
+    expect(fleet[0]).toMatchObject({ usage: 300, usd: 3, isSyntheticAggregate: true });
+    expect(buildAllModels(fleet).reduce((sum, model) => sum + model.usage, 0)).toBe(300);
+  });
+
   it("keeps two decimal places for small provider percentages", () => {
     const fleet = buildFleetData({
       sources: [

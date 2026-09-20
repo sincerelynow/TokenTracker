@@ -73,6 +73,7 @@ function canonicalSource(source: any): string {
 }
 
 const CODEX_ROOT_PREFIX = "codex-root:";
+const DSH_ROOT_PREFIX = "dsh-root:";
 
 function isCodexFleetSource(source: any) {
   const normalized = String(source || "").trim().toLowerCase();
@@ -86,8 +87,20 @@ function codexRootLabel(source: any) {
   return (key || "codex").replace(/-/g, "_").toUpperCase();
 }
 
-function codexRootSuffix(source: any) {
-  const key = String(source || "").trim().toLowerCase().slice(CODEX_ROOT_PREFIX.length);
+function isDshFleetSource(source: any) {
+  const normalized = String(source || "").trim().toLowerCase();
+  return normalized === "dsh" || normalized.startsWith(DSH_ROOT_PREFIX);
+}
+
+function dshRootLabel(source: any) {
+  const normalized = String(source || "").trim().toLowerCase();
+  if (normalized === "dsh") return "DSH";
+  const key = normalized.slice(DSH_ROOT_PREFIX.length).replace(/-[0-9a-f]{8}$/, "");
+  return (key || "dsh").replace(/-/g, "_").toUpperCase();
+}
+
+function rootSuffix(source: any, prefix: string) {
+  const key = String(source || "").trim().toLowerCase().slice(prefix.length);
   const match = key.match(/-([0-9a-f]{8})$/);
   return match ? match[1].toUpperCase() : key.slice(-8).toUpperCase();
 }
@@ -199,6 +212,8 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
     .map((entry: any) => {
       const label = isCodexFleetSource(entry.source)
         ? (entry.instanceLabel || codexRootLabel(entry.source))
+        : isDshFleetSource(entry.source)
+          ? (entry.instanceLabel || dshRootLabel(entry.source))
         : entry.source
           ? String(entry.source).toUpperCase()
         : safeCopy("shared.placeholder.short");
@@ -247,54 +262,39 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
       };
     });
 
-  const codexCards = cards.filter((entry: any) => isCodexFleetSource(entry.source));
-  const rootCards = codexCards.filter((entry: any) => String(entry.source).startsWith(CODEX_ROOT_PREFIX));
-  const labelCounts = new Map<string, number>();
-  for (const card of rootCards) labelCounts.set(card.label, (labelCounts.get(card.label) || 0) + 1);
-  for (const card of rootCards) {
-    if ((labelCounts.get(card.label) || 0) > 1) card.label = `${card.label}_${codexRootSuffix(card.source)}`;
-  }
-  const legacyCard = codexCards.find((entry: any) => entry.source === "codex");
-  if (legacyCard && rootCards.length > 0) legacyCard.isHiddenProvider = true;
-  const shouldAggregate = rootCards.length >= 2 || (rootCards.length > 0 && Boolean(legacyCard));
-  if (!shouldAggregate) return cards;
-
-  const aggregateModels = new Map<string, any>();
-  for (const card of codexCards) {
-    for (const model of card.models) {
+  const addAggregate = (currentCards: any[], { family, rootPrefix, isFamily, labelKey }: any) => {
+    const familyCards = currentCards.filter((entry: any) => isFamily(entry.source) && !entry.isSyntheticAggregate);
+    const rootCards = familyCards.filter((entry: any) => String(entry.source).startsWith(rootPrefix));
+    const labelCounts = new Map<string, number>();
+    for (const card of rootCards) labelCounts.set(card.label, (labelCounts.get(card.label) || 0) + 1);
+    for (const card of rootCards) if ((labelCounts.get(card.label) || 0) > 1) card.label = `${card.label}_${rootSuffix(card.source, rootPrefix)}`;
+    const legacyCard = familyCards.find((entry: any) => entry.source === family);
+    if (legacyCard && rootCards.length > 0) legacyCard.isHiddenProvider = true;
+    if (!(rootCards.length >= 2 || (rootCards.length > 0 && Boolean(legacyCard)))) return currentCards;
+    const aggregateModels = new Map<string, any>();
+    for (const card of familyCards) for (const model of card.models) {
       const key = String(model.id || model.name).toLowerCase();
       const current = aggregateModels.get(key) || { ...model, usage: 0, cost: 0 };
       current.usage += Number(model.usage) || 0;
       current.cost += Number(model.cost) || 0;
       aggregateModels.set(key, current);
     }
-  }
-  const aggregateUsage = codexCards.reduce((sum: number, card: any) => sum + card.usage, 0);
-  const models = Array.from(aggregateModels.values()).map((model: any) => ({
-    ...model,
-    share: aggregateUsage > 0 ? Math.round((model.usage / aggregateUsage) * 1000) / 10 : 0,
-  }));
-  const cacheReusedTokens = codexCards.reduce((sum: number, card: any) => sum + card.cacheReusedTokens, 0);
-  const cacheInputTokens = codexCards.reduce((sum: number, card: any) => sum + card.cacheInputTokens, 0);
-  const aggregate = {
-    source: "codex-all",
-    label: safeCopy("usage.overview.codex_all"),
-    totalPercent: ((aggregateUsage / grandTotal) * 100).toFixed(2),
-    totalPercentValue: (aggregateUsage / grandTotal) * 100,
-    usd: codexCards.reduce((sum: number, card: any) => sum + card.usd, 0),
-    usage: aggregateUsage,
-    cacheHitRate: cacheInputTokens > 0 ? Math.round((cacheReusedTokens / cacheInputTokens) * 100) : null,
-    cacheReusedTokens,
-    cacheInputTokens,
-    models,
-    isSyntheticAggregate: true,
+    const usage = familyCards.reduce((sum: number, card: any) => sum + card.usage, 0);
+    const cacheReusedTokens = familyCards.reduce((sum: number, card: any) => sum + card.cacheReusedTokens, 0);
+    const cacheInputTokens = familyCards.reduce((sum: number, card: any) => sum + card.cacheInputTokens, 0);
+    const aggregate = {
+      source: `${family}-all`, label: safeCopy(labelKey), totalPercent: ((usage / grandTotal) * 100).toFixed(2),
+      totalPercentValue: (usage / grandTotal) * 100, usd: familyCards.reduce((sum: number, card: any) => sum + card.usd, 0), usage,
+      cacheHitRate: cacheInputTokens > 0 ? Math.round((cacheReusedTokens / cacheInputTokens) * 100) : null,
+      cacheReusedTokens, cacheInputTokens,
+      models: Array.from(aggregateModels.values()).map((model: any) => ({ ...model, share: usage > 0 ? Math.round((model.usage / usage) * 1000) / 10 : 0 })),
+      isSyntheticAggregate: true,
+    };
+    const index = currentCards.findIndex((entry: any) => isFamily(entry.source));
+    return [...currentCards.slice(0, index), aggregate, ...currentCards.slice(index)];
   };
-  const firstCodexIndex = cards.findIndex((entry: any) => isCodexFleetSource(entry.source));
-  return [
-    ...cards.slice(0, firstCodexIndex),
-    aggregate,
-    ...cards.slice(firstCodexIndex),
-  ];
+  const withCodex = addAggregate(cards, { family: "codex", rootPrefix: CODEX_ROOT_PREFIX, isFamily: isCodexFleetSource, labelKey: "usage.overview.codex_all" });
+  return addAggregate(withCodex, { family: "dsh", rootPrefix: DSH_ROOT_PREFIX, isFamily: isDshFleetSource, labelKey: "usage.overview.dsh_all" });
 }
 
 /**

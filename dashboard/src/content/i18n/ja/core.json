@@ -607,5 +607,19 @@
   "settings.codex_roots.saving": "保存中...",
   "settings.codex_roots.saved": "Codex スキャンルートを保存しました。",
   "settings.codex_roots.error": "Codex ルートを保存できませんでした: {{error}}",
-  "usage.overview.codex_all": "CODEX ALL"
+  "usage.overview.codex_all": "CODEX ALL",
+  "settings.dsh_roots.title": "DeepSeek Harness スキャンルート",
+  "settings.dsh_roots.subtitle": "セッションをスキャンするローカル DeepSeek Harness ホームを選択します。変更は次回の同期時に反映されます。",
+  "settings.dsh_roots.add": "ルートを追加",
+  "settings.dsh_roots.path": "DeepSeek Harness ルート {{index}}",
+  "settings.dsh_roots.placeholder": "例：~/.dsh",
+  "settings.dsh_roots.remove": "DeepSeek Harness ルート {{index}} を削除",
+  "settings.dsh_roots.duplicate": "このルートは既に登録されています。",
+  "settings.dsh_roots.detected": "セッションを検出しました",
+  "settings.dsh_roots.not_detected": "セッションはまだ検出されていません",
+  "settings.dsh_roots.save": "ルートを保存",
+  "settings.dsh_roots.saving": "保存中...",
+  "settings.dsh_roots.saved": "DeepSeek Harness スキャンルートを保存しました。",
+  "settings.dsh_roots.error": "DeepSeek Harness ルートを保存できませんでした：{{error}}",
+  "usage.overview.dsh_all": "DSH ALL"
 }

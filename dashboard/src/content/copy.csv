@@ -500,7 +500,21 @@ settings.codex_roots.save,ui,SettingsPage,CodexRootsSettings,save,"Save roots",,
 settings.codex_roots.saving,ui,SettingsPage,CodexRootsSettings,saving,"Saving...",,active
 settings.codex_roots.saved,ui,SettingsPage,CodexRootsSettings,saved,"Codex scan roots saved.",,active
 settings.codex_roots.error,ui,SettingsPage,CodexRootsSettings,error,"Could not save Codex roots: {{error}}",,active
+settings.dsh_roots.title,ui,SettingsPage,DshRootsSettings,title,"DeepSeek Harness scan roots",,active
+settings.dsh_roots.subtitle,ui,SettingsPage,DshRootsSettings,subtitle,"Choose the local DeepSeek Harness homes scanned for sessions. Changes apply to the next sync.",,active
+settings.dsh_roots.add,ui,SettingsPage,DshRootsSettings,add,"Add root",,active
+settings.dsh_roots.path,ui,SettingsPage,DshRootsSettings,path,"DeepSeek Harness root {{index}}",,active
+settings.dsh_roots.placeholder,ui,SettingsPage,DshRootsSettings,placeholder,"For example: ~/.dsh",,active
+settings.dsh_roots.remove,ui,SettingsPage,DshRootsSettings,remove,"Remove DeepSeek Harness root {{index}}",,active
+settings.dsh_roots.duplicate,ui,SettingsPage,DshRootsSettings,duplicate,"This root is already listed.",,active
+settings.dsh_roots.detected,ui,SettingsPage,DshRootsSettings,detected,"Sessions detected",,active
+settings.dsh_roots.not_detected,ui,SettingsPage,DshRootsSettings,not_detected,"No sessions detected yet",,active
+settings.dsh_roots.save,ui,SettingsPage,DshRootsSettings,save,"Save roots",,active
+settings.dsh_roots.saving,ui,SettingsPage,DshRootsSettings,saving,"Saving...",,active
+settings.dsh_roots.saved,ui,SettingsPage,DshRootsSettings,saved,"DeepSeek Harness scan roots saved.",,active
+settings.dsh_roots.error,ui,SettingsPage,DshRootsSettings,error,"Could not save DeepSeek Harness roots: {{error}}",,active
 usage.overview.codex_all,ui,DashboardPage,UsageOverview,codex_all,"CODEX ALL",,active
+usage.overview.dsh_all,ui,DashboardPage,UsageOverview,dsh_all,"DSH ALL",,active
 settings.section.network.description,ui,SettingsPage,NetworkSection,sec_network_description,"Control the proxy used for cloud sync and diagnostics.",,active
 settings.network.mode.label,ui,SettingsPage,NetworkSection,mode_label,"Outbound proxy",,active
 settings.network.mode.hint,ui,SettingsPage,NetworkSection,mode_hint,"Choose how Token Tracker reaches the internet for cloud sync. App updates always follow the system proxy.",,active

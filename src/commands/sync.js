@@ -9,6 +9,7 @@ const { resolveInstallPaths, resolveZcodeNativeDbPath, ensureFlatCursor } = requ
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
 const wsl = require("../lib/wsl-probe");
 const { resolveCodexRootsSync } = require("../lib/codex-roots");
+const { resolveDshRootsSync } = require("../lib/dsh-roots");
 const { isCodexRootSource } = require("../lib/codex-source");
 const {
   ensureDir,
@@ -1623,7 +1624,12 @@ async function cmdSync(argv, context = {}) {
     let dshResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0, deferredMigrations: 0 };
     if (sourceAllowed("dsh")) {
       await migrateLegacyDeepseekHarnessSource({ cursors, queuePath, queueStatePath });
-      const dshSessionFiles = await resolveDshSessionFiles(process.env);
+      const dshRootsState = resolveDshRootsSync({ home, trackerDir, env: process.env });
+      const dshSessionFiles = await resolveDshSessionFiles(process.env, {
+        trackerDir,
+        dshRootsState,
+        withRootMetadata: true,
+      });
       if (dshSessionFiles.length > 0) {
         if (progress?.enabled) {
           progress.start(

@@ -20,6 +20,7 @@ const { probeGrokHookState } = require("./grok-hook");
 const { resolveTrackerPaths } = require("./tracker-paths");
 const wsl = require("./wsl-probe");
 const { resolveCodexRootsSync } = require("./codex-roots");
+const { resolveDshRootsSync } = require("./dsh-roots");
 // TASK-011: Kiro paths inlined here to avoid pulling the ~4000-line
 // rollout module on every `tokentracker status` / `diagnostics` call.
 // rollout.js still exports resolveKiroCliDbPath / resolveKiroBasePath for
@@ -96,6 +97,12 @@ async function collectTrackerDiagnostics({
         source: "invalid_config",
       };
     }
+  }
+  let dshRootState;
+  try {
+    dshRootState = resolveDshRootsSync({ home, trackerDir, env: process.env });
+  } catch {
+    dshRootState = { roots: [], configured: false, source: "invalid_config" };
   }
   const primaryCodexHome = codexRootState.roots.find((root) => root.origin !== "wsl")?.path
     || codexRootState.roots[0]?.path
@@ -226,6 +233,7 @@ async function collectTrackerDiagnostics({
         ...root,
         path: redactValue(root.path, home),
       })),
+      dsh_roots: dshRootState.roots.map((root) => ({ ...root, path: redactValue(root.path, home) })),
       codex_config: redactValue(codexConfigPath, home),
       code_home: redactValue(codeHome, home),
       code_config: redactValue(codeConfigPath, home),

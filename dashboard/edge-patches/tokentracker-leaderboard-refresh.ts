@@ -1098,7 +1098,9 @@ export default async function (req: Request): Promise<Response> {
         aggMap.set(row.user_id, agg);
       }
       const tokens = Number(row.total_tokens) || 0;
-      const canonicalSource = row.source.startsWith("codex-root:") ? "codex" : row.source;
+      const canonicalSource = row.source.startsWith("codex-root:")
+        ? "codex"
+        : row.source.startsWith("dsh-root:") ? "dsh" : row.source;
       const col = SOURCE_COLUMN_MAP[canonicalSource] ?? "other_tokens";
       (agg as unknown as Record<string, number>)[col] += tokens;
       agg.total_tokens += tokens;

@@ -428,6 +428,40 @@ test("parseDshIncremental writes queue rows, dedups on rerun, and adds appended 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("parseDshIncremental attributes root usage and keeps the first duplicate-session owner", async () => {
+  const first = await makeTree({ compression: "none", lines: [headerLine("shared-session"), requestHeaderLine(0), assistantLine(1, { inputTokens: 10, outputTokens: 5 })] });
+  const second = await makeTree({ compression: "none", lines: [headerLine("shared-session"), requestHeaderLine(0), assistantLine(1, { inputTokens: 10, outputTokens: 5 })] });
+  const queuePath = path.join(first.dir, "root-queue.jsonl");
+  const cursors = {};
+  await parseDshIncremental({
+    sessionFiles: [
+      { path: first.logPath, statsSource: "dsh-root:first-12345678" },
+      { path: second.logPath, statsSource: "dsh-root:second-87654321" },
+    ],
+    cursors,
+    queuePath,
+  });
+  const rows = fs.readFileSync(queuePath, "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual([...new Set(rows.map((row) => row.source))], ["dsh-root:first-12345678"]);
+  assert.equal(cursors.dsh.sessions["shared-session"].statsSource, "dsh-root:first-12345678");
+  fs.rmSync(first.dir, { recursive: true, force: true });
+  fs.rmSync(second.dir, { recursive: true, force: true });
+});
+
+test("parseDshIncremental migrates an unchanged legacy dsh ledger into its root source", async () => {
+  const { dir, logPath } = await makeTree({ compression: "none", lines: [headerLine("legacy-root"), requestHeaderLine(0), assistantLine(1, { inputTokens: 10, outputTokens: 5 })] });
+  const queuePath = path.join(dir, "migration-queue.jsonl");
+  const cursors = {};
+  await parseDshIncremental({ sessionFiles: [logPath], cursors, queuePath });
+  await parseDshIncremental({ sessionFiles: [{ path: logPath, statsSource: "dsh-root:dsh-12345678" }], cursors, queuePath });
+  const rows = fs.readFileSync(queuePath, "utf8").trim().split("\n").map(JSON.parse);
+  const latest = new Map(rows.map((row) => [`${row.source}|${row.model}|${row.hour_start}`, row]));
+  assert.equal([...latest.values()].find((row) => row.source === "dsh").total_tokens, 0);
+  assert.equal([...latest.values()].find((row) => row.source === "dsh-root:dsh-12345678").total_tokens, 15);
+  assert.equal(cursors.dsh.sessions["legacy-root"].statsSource, "dsh-root:dsh-12345678");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("parseDshIncremental does not acknowledge an incomplete trailing event", async () => {
   const { dir, logPath } = await makeTree({
     compression: "none",

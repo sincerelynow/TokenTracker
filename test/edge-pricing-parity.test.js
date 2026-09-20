@@ -31,12 +31,25 @@ const MIRRORS = [
 ];
 
 const MODEL_API_CALL_SITES = [
-  ["tokentracker-account-daily.ts", /const mdl = String\(row\.model \|\| "unknown"\);/],
+  // account-daily folds per-model totals in Postgres (account_daily_compact),
+  // same as account-heatmap below: the call site to pin is the one copying
+  // Postgres' model keys through untouched.
+  [
+    "tokentracker-account-daily.ts",
+    /for \(const name of Object\.keys\(models\)\) mdl\[name\] = Number\(models\[name\]\) \|\| 0;/,
+  ],
   ["tokentracker-account-model-breakdown.ts", /model: mdl, model_id: mdl/],
   ["tokentracker-leaderboard-profile.ts", /favoriteModel = \{ model_name: model, total_tokens: tokens \};/],
   ["tokentracker-account-hourly.ts", /const mdl = String\(row\.model \|\| "unknown"\);/],
   ["tokentracker-account-monthly.ts", /const mdl = String\(row\.model \|\| "unknown"\);/],
-  ["tokentracker-account-heatmap.ts", /const mdl = String\(row\.model \|\| "unknown"\);/],
+  // account-heatmap folds per-model totals in Postgres (account_heatmap_compact),
+  // so there is no per-row String(row.model) here any more. The call site to pin
+  // is the one that copies Postgres' model keys through untouched — that is what
+  // would break if someone reintroduced display-name mapping on the edge.
+  [
+    "tokentracker-account-heatmap.ts",
+    /for \(const name of Object\.keys\(models\)\) mdl\[name\] = Number\(models\[name\]\) \|\| 0;/,
+  ],
 ];
 
 const BLOCK_RE =
@@ -84,6 +97,8 @@ test("canonical pricing block retains regression-prone entries and matcher order
     '"cursor-grok-4.5-fast"',
     '"glm-5.3"',
     '"glm-5.3-flash"',
+    '"deepseek-v4.1-flash"',
+    '"deepseek-flash"',
   ]) {
     assert.ok(block.includes(`${key}:`), `canonical table lost ${key}`);
   }

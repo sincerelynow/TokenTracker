@@ -4,6 +4,7 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const cp = require("node:child_process");
 const readline = require("node:readline");
+const crypto = require("node:crypto");
 
 const { resolveInstallPaths, resolveZcodeNativeDbPath, ensureFlatCursor } = require("../lib/install-resolver");
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
@@ -3138,14 +3139,25 @@ async function cmdSync(argv, context = {}) {
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
     let autoUploadDecision = null;
+    let syncMachineId = config?.machineId;
+    if (runtime.deviceToken && runtime.baseUrl) {
+      try {
+        syncMachineId = require("../lib/machine-id").getOrCreateMachineId(queuePath) || syncMachineId;
+      } catch {
+        // A read-only home must not prevent a best-effort upload.
+      }
+    }
+    const uploadIdentity = resolveCloudUploadIdentity({
+      baseUrl: runtime.baseUrl, deviceToken: runtime.deviceToken,
+      accountId: process.env.TOKENTRACKER_SYNC_ACCOUNT_ID ||
+        (runtime.deviceToken === config?.deviceToken ? config?.user_id : ""),
+      machineId: syncMachineId, queuePath,
+    });
 
     if (opts.publishAccount || (legacyBaseUrlMigration && opts.auto)) {
       const uploadStateBefore = (await readJson(queueStatePath)) || { offset: 0 };
       const queueSizeBefore = await safeStatSize(queuePath);
-      const uploadDestination = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
-      const destinationOffsetBefore = uploadDestination
-        ? Number(uploadStateBefore.destinations?.[uploadDestination]?.offset || 0)
-        : 0;
+      const destinationOffsetBefore = getCloudUploadOffset(uploadStateBefore, uploadIdentity);
       const pendingBytesBefore = Math.max(
         0,
         queueSizeBefore - destinationOffsetBefore,
@@ -3173,15 +3185,6 @@ async function cmdSync(argv, context = {}) {
         (!isBackgroundLightweightSync || opts.publishAccount) &&
         (!autoUploadDecision || autoUploadDecision.allowed)) {
       uploadAttempted = true;
-      // Mirror the machine identity into the purge-surviving seed file so a
-      // future `uninstall --purge` + reinstall recovers the same cloud device
-      // instead of double-counting history under a new one (issue #176). This
-      // is the migration path for installs that predate the seed file.
-      try {
-        require("../lib/machine-id").getOrCreateMachineId(queuePath);
-      } catch {
-        // best effort — upload below must not be blocked by identity mirroring
-      }
       try {
         let successfulDeviceToken = runtime.deviceToken;
         const drainWithToken = (deviceToken) =>
@@ -3189,6 +3192,10 @@ async function cmdSync(argv, context = {}) {
             baseUrl: runtime.baseUrl,
             anonKey: runtime.anonKey,
             deviceToken,
+            // A legacy fallback token may belong to another account. Never
+            // advance the replacement credential's account checkpoint with it.
+            accountId: deviceToken === runtime.deviceToken ? uploadIdentity.accountId : undefined,
+            machineId: uploadIdentity.machineId,
             queuePath,
             queueStatePath,
             maxBatches: opts.drain ? 100 : (autoUploadDecision?.maxBatches || 5),
@@ -3200,13 +3207,12 @@ async function cmdSync(argv, context = {}) {
           const fallbackDeviceToken = legacyBaseUrlMigration?.previousDeviceToken;
           const replacementDeviceToken = legacyBaseUrlMigration?.replacementDeviceToken;
           const stateAfterFailure = (await readJson(queueStatePath)) || { offset: 0 };
-          const failureDestination = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
           const canFallbackWithoutSplittingHistory =
             (error?.status === 401 || error?.status === 403) &&
             replacementDeviceToken &&
             fallbackDeviceToken &&
             fallbackDeviceToken !== replacementDeviceToken &&
-            Number(stateAfterFailure.destinations?.[failureDestination]?.offset || 0) === 0;
+            getCloudUploadOffset(stateAfterFailure, uploadIdentity) === 0;
           if (!canFallbackWithoutSplittingHistory) throw error;
           successfulDeviceToken = fallbackDeviceToken;
           uploadResult = await drainWithToken(successfulDeviceToken);
@@ -3271,11 +3277,8 @@ async function cmdSync(argv, context = {}) {
     // Only the main queue is uploaded by drainQueueToCloud. project.queue.jsonl
     // is local project-usage state, so counting it here creates false backlog
     // and can keep auto retry alive even after cloud sync has drained.
-    const currentDestination = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
     const pendingBytes = Math.max(0,
-      queueSize - (currentDestination
-        ? Number(afterState.destinations?.[currentDestination]?.offset || 0)
-        : 0));
+      queueSize - getCloudUploadOffset(afterState, uploadIdentity));
 
     if (pendingBytes <= 0) {
       await clearAutoRetry(trackerDir);
@@ -3945,19 +3948,35 @@ function normalizeRemoteHttpBaseUrl(value) {
   }
 }
 
-async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, queuePath, queueStatePath, maxBatches = 5, batchSize = 200 }) {
-  const state = (await readJson(queueStatePath)) || { offset: 0 };
+function resolveCloudUploadIdentity({ baseUrl, deviceToken, accountId, machineId, queuePath }) {
   const destination = normalizeRemoteHttpBaseUrl(baseUrl) || String(baseUrl || "").trim();
+  // Legacy CLI callers without a user id still need isolated checkpoints.
+  // Token rotation may replay rows, which is safe for the same cloud device.
+  const account = String(accountId || "").trim() ||
+    `token:${crypto.createHash("sha256").update(String(deviceToken || "")).digest("hex")}`;
+  const machine = String(machineId || "").trim() ||
+    `queue:${crypto.createHash("sha256").update(path.resolve(queuePath)).digest("hex")}`;
+  return { destination, accountId: account, machineId: machine };
+}
+
+function getCloudUploadOffset(state, { destination, accountId, machineId }) {
+  return Number(state.destinations?.[destination]?.accounts?.[accountId]?.[machineId]?.offset || 0);
+}
+
+async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, accountId, machineId, queuePath, queueStatePath, maxBatches = 5, batchSize = 200 }) {
+  const state = (await readJson(queueStatePath)) || { offset: 0 };
+  const identity = resolveCloudUploadIdentity({ baseUrl, deviceToken, accountId, machineId, queuePath });
+  const { destination } = identity;
   if (!destination) throw new Error("InsForge is not configured");
   if (!state.destinations || typeof state.destinations !== "object" || Array.isArray(state.destinations)) {
     state.destinations = {};
   }
   const destinationState = state.destinations[destination] || {};
-  // The legacy offset has no destination identity. It may belong to the
-  // upstream project, so treating it as proof that a new project received the
-  // queue would silently discard all historical usage. Replaying is safe:
-  // ingest upserts by the row identity.
-  let offset = Number(destinationState.offset ?? 0);
+  const accounts = destinationState.accounts || {};
+  const machines = accounts[identity.accountId] || {};
+  // A URL-only checkpoint cannot prove which account and machine received the
+  // queue. Every new scoped identity starts at zero and replays available rows.
+  let offset = getCloudUploadOffset(state, identity);
   let inserted = 0;
   let skipped = 0;
   let batches = 0;
@@ -4008,7 +4027,13 @@ async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, queuePath, que
     batches += 1;
 
     offset = result.nextOffset;
-    state.destinations[destination] = { ...destinationState, offset };
+    state.destinations[destination] = {
+      ...destinationState,
+      accounts: {
+        ...accounts,
+        [identity.accountId]: { ...machines, [identity.machineId]: { offset } },
+      },
+    };
     // Keep the legacy field aligned for old readers and this active target.
     state.offset = offset;
     state.updatedAt = new Date().toISOString();

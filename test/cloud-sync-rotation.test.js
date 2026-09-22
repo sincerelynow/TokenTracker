@@ -14,7 +14,8 @@ test("cloud sync source includes device-session rotation and recovery", () => {
   assert.match(src, /issuedAtMs \+ DEVICE_TOKEN_ROTATE_AFTER_MS <= nowMs/);
   assert.match(src, /clearCloudDeviceSession\(\)/);
   assert.match(src, /await postLocalUsageSync/);
-  assert.match(src, /runCloudUsageSyncNow[\s\S]*syncCloudUsageWithRecovery\(getAccessToken,\s*\{\s*drain:\s*true\s*\}\)/);
+  assert.match(src, /runCloudUsageSyncNow[\s\S]*syncCloudUsageWithRecovery\(getAccessToken,\s*accountId,\s*\{\s*drain:\s*true\s*\}\)/);
+  assert.match(src, /current\.accountId !== accountId/);
 });
 
 test("local auth helper caches the per-process token in memory", async () => {

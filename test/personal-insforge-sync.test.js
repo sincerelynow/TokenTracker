@@ -21,15 +21,15 @@ test("upload checkpoints are isolated by InsForge destination", async (t) => {
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  await drainQueueToCloud({ baseUrl: "https://one.example", deviceToken: "one", queuePath, queueStatePath, maxBatches: 1 });
-  await drainQueueToCloud({ baseUrl: "https://two.example", deviceToken: "two", queuePath, queueStatePath, maxBatches: 1 });
-  await drainQueueToCloud({ baseUrl: "https://two.example", deviceToken: "two", queuePath, queueStatePath, maxBatches: 1 });
+  await drainQueueToCloud({ baseUrl: "https://one.example", deviceToken: "one", accountId: "user", machineId: "machine", queuePath, queueStatePath, maxBatches: 1 });
+  await drainQueueToCloud({ baseUrl: "https://two.example", deviceToken: "two", accountId: "user", machineId: "machine", queuePath, queueStatePath, maxBatches: 1 });
+  await drainQueueToCloud({ baseUrl: "https://two.example", deviceToken: "two", accountId: "user", machineId: "machine", queuePath, queueStatePath, maxBatches: 1 });
 
   assert.equal(requests.length, 2, "each destination uploads once; the second sync is idempotent");
   const state = JSON.parse(fs.readFileSync(queueStatePath, "utf8"));
   assert.equal(Object.keys(state.destinations).length, 2);
-  assert.ok(state.destinations["https://one.example"].offset > 0);
-  assert.ok(state.destinations["https://two.example"].offset > 0);
+  assert.ok(state.destinations["https://one.example"].accounts.user.machine.offset > 0);
+  assert.ok(state.destinations["https://two.example"].accounts.user.machine.offset > 0);
 });
 
 test("a legacy offset does not suppress the first upload to a personal instance", async (t) => {
@@ -47,11 +47,39 @@ test("a legacy offset does not suppress the first upload to a personal instance"
   };
   t.after(() => { globalThis.fetch = originalFetch; });
 
-  await drainQueueToCloud({ baseUrl: "https://personal.example", deviceToken: "personal", queuePath, queueStatePath });
+  await drainQueueToCloud({ baseUrl: "https://personal.example", deviceToken: "personal", accountId: "user", machineId: "machine", queuePath, queueStatePath });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].body.hourly[0].source, "dsh-root:one");
   assert.equal(JSON.stringify(requests[0].body).includes(dir), false);
-  assert.equal(JSON.parse(fs.readFileSync(queueStatePath, "utf8")).destinations["https://personal.example"].offset, fs.statSync(queuePath).size);
+  assert.equal(JSON.parse(fs.readFileSync(queueStatePath, "utf8")).destinations["https://personal.example"].accounts.user.machine.offset, fs.statSync(queuePath).size);
+});
+
+test("same InsForge URL replays once for each user on the same machine", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-account-switch-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const queuePath = path.join(dir, "queue.jsonl");
+  const queueStatePath = path.join(dir, "queue.state.json");
+  fs.writeFileSync(queuePath, `${JSON.stringify({ source: "codex", model: "gpt", hour_start: "2026-01-01T00:00:00Z", input_tokens: 10, output_tokens: 0, total_tokens: 10 })}\n`);
+  fs.writeFileSync(queueStatePath, JSON.stringify({ destinations: { "https://personal.example": { offset: fs.statSync(queuePath).size } } }));
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    requests.push(init.headers.Authorization);
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => '{"inserted":1,"skipped":0}' };
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  const common = { baseUrl: "https://personal.example", machineId: "same-machine", queuePath, queueStatePath };
+  await drainQueueToCloud({ ...common, accountId: "test-user", deviceToken: "test-token" });
+  await drainQueueToCloud({ ...common, accountId: "formal-user", deviceToken: "formal-token" });
+  await drainQueueToCloud({ ...common, accountId: "formal-user", deviceToken: "formal-token-rotated" });
+  await drainQueueToCloud({ ...common, accountId: "test-user", deviceToken: "test-token" });
+  await drainQueueToCloud({ ...common, machineId: "another-machine", accountId: "formal-user", deviceToken: "formal-other-machine-token" });
+  assert.deepEqual(requests, ["Bearer test-token", "Bearer formal-token", "Bearer formal-other-machine-token"]);
+  const accounts = JSON.parse(fs.readFileSync(queueStatePath, "utf8")).destinations["https://personal.example"].accounts;
+  assert.equal(accounts["test-user"]["same-machine"].offset, fs.statSync(queuePath).size);
+  assert.equal(accounts["formal-user"]["same-machine"].offset, fs.statSync(queuePath).size);
+  assert.equal(accounts["formal-user"]["another-machine"].offset, fs.statSync(queuePath).size);
 });
 
 test("Codex and DSH root rows retain four independent sources without local paths", async (t) => {

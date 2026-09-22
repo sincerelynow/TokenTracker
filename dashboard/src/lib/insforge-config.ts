@@ -1,7 +1,37 @@
 import { createClient } from "@insforge/sdk";
 
-// Cloud access requires an explicit build-time InsForge URL and anon key.
+// Hosted dashboards use build-time config; local dashboards can use CLI config.
 const PROD_INSFORGE_BASE_URL = "";
+type RuntimeCloudConfig = { baseUrl: string; anonKey: string };
+let runtimeCloudConfig: RuntimeCloudConfig | undefined;
+
+function isLocalDashboard(): boolean {
+  if (typeof window === "undefined") return false;
+  return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname);
+}
+
+/** Read the local CLI's public cloud target before mounting the auth provider. */
+export async function loadRuntimeInsforgeConfig(): Promise<void> {
+  if (!isLocalDashboard()) return;
+  runtimeCloudConfig = undefined;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch("/functions/tokentracker-cloud-config", { cache: "no-store", signal: controller.signal });
+    if (!response.ok) return; // Older local servers retain build-time config.
+    const data = await response.json();
+    const baseUrl = typeof data?.baseUrl === "string" ? data.baseUrl.trim() : "";
+    const anonKey = typeof data?.anonKey === "string" ? data.anonKey.trim() : "";
+    runtimeCloudConfig = {
+      baseUrl: /^https:\/\//i.test(baseUrl) && anonKey ? baseUrl : "",
+      anonKey: /^https:\/\//i.test(baseUrl) && anonKey ? anonKey : "",
+    };
+  } catch {
+    // An older server or unavailable endpoint can still use build-time config.
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * InsForge 云端（SDK OAuth/Session）。`getInsforgeBaseUrl()` 在 localhost 有 env 时同样指向云端。
@@ -9,6 +39,7 @@ const PROD_INSFORGE_BASE_URL = "";
  */
 /** 云端 InsForge 原始 URL（供 proxy 目标和 edge function 调用使用） */
 export function getInsforgeRemoteUrl(): string {
+  if (isLocalDashboard() && runtimeCloudConfig) return runtimeCloudConfig.baseUrl;
   const env = typeof import.meta !== "undefined" ? import.meta.env : undefined;
   return (
     env?.VITE_INSFORGE_BASE_URL ||
@@ -22,10 +53,7 @@ export function getInsforgeRemoteUrl(): string {
  * 部署后直接指向云端。
  */
 function getInsforgeBaseUrl(): string {
-  const isLocalhost =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-  if (isLocalhost) return window.location.origin;
+  if (isLocalDashboard()) return window.location.origin;
   const env = typeof import.meta !== "undefined" ? import.meta.env : undefined;
   return (
     env?.VITE_INSFORGE_BASE_URL ||
@@ -35,6 +63,7 @@ function getInsforgeBaseUrl(): string {
 }
 
 export function getInsforgeAnonKey(): string {
+  if (isLocalDashboard() && runtimeCloudConfig) return runtimeCloudConfig.anonKey;
   const env = typeof import.meta !== "undefined" ? import.meta.env : undefined;
   return (
     env?.VITE_INSFORGE_ANON_KEY ||

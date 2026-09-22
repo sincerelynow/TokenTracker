@@ -1205,6 +1205,7 @@ function localDataApiPlugin() {
         }
         const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
         const isRepoPetApi = url.pathname === "/api/local-auth"
+          || url.pathname === "/functions/tokentracker-cloud-config"
           || url.pathname === "/functions/tokentracker-pets"
           // The subscription store schema/shape evolves with this checkout
           // (cycle field, corrupt-store backups); a stale packaged app on

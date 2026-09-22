@@ -769,7 +769,7 @@ export function LeaderboardPage({
     try {
       setCloudSyncEnabled(true);
       setCloudSyncOn(true);
-      await runCloudUsageSyncNow(() => resolveAuthAccessTokenWithRetry(effectiveAuthToken));
+      await runCloudUsageSyncNow(() => resolveAuthAccessTokenWithRetry(effectiveAuthToken), cloudUser?.id || "");
     } catch (e) {
       console.warn("[tokentracker] sync:", e);
     } finally {

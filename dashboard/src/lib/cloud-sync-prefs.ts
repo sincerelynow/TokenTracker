@@ -3,6 +3,7 @@ const KEY_DEVICE = "tokentracker_cloud_device_session_v1";
 const KEY_DEVICE_ID = "tokentracker_cloud_device_id_v1";
 const KEY_LAST_SYNC = "tokentracker_cloud_last_sync_ts";
 const KEY_USAGE_READY = "tokentracker_cloud_usage_ready_v1";
+const KEY_ACCOUNT_ID = "tokentracker_cloud_account_id_v1";
 export const CLOUD_USAGE_SYNCED_EVENT = "tt.cloudUsageSynced";
 export const CLOUD_LEADERBOARD_REFRESHED_EVENT = "tt.cloudLeaderboardRefreshed";
 let memoryDeviceSession: CloudDeviceSession | null = null;
@@ -12,6 +13,7 @@ export type CloudDeviceSession = {
   deviceId: string;
   issuedAt: string;
   baseUrl?: string;
+  accountId?: string;
 };
 
 function clearLegacyStoredDeviceSession(): void {
@@ -132,6 +134,34 @@ export function clearCloudDeviceSession(): void {
     /* ignore */
   }
   clearLegacyStoredDeviceSession();
+}
+
+/** Reset account-scoped cloud state when the authenticated user changes. */
+export function resetCloudSyncAccountState(): void {
+  clearCloudDeviceSession();
+  setCloudUsageReady(false);
+  try {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("tt.cloudSyncChanged"));
+    }
+  } catch {
+    /* best-effort invalidation for the active dashboard */
+  }
+}
+
+export function getCloudSyncAccountId(): string {
+  try { return localStorage.getItem(KEY_ACCOUNT_ID) || ""; } catch { return ""; }
+}
+
+/** Invalidate cached cloud state whenever the authenticated account changes. */
+export function setCloudSyncAccountId(accountId: string): void {
+  const next = String(accountId || "").trim();
+  if (getCloudSyncAccountId() === next) return;
+  resetCloudSyncAccountState();
+  try {
+    if (next) localStorage.setItem(KEY_ACCOUNT_ID, next);
+    else localStorage.removeItem(KEY_ACCOUNT_ID);
+  } catch { /* memory-only session still gets invalidated */ }
 }
 
 export function emitCloudUsageSynced(): void {

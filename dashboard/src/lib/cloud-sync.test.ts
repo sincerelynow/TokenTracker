@@ -159,4 +159,16 @@ describe("cloud usage sync", () => {
       insforgeBaseUrl: "https://cloud.example",
     });
   });
+
+  it("issues a new device session and syncs when the account changes on one URL", async () => {
+    const fetchMock = installFetchMock();
+    await runCloudUsageSyncNow(async () => "test-access", "test-user");
+    await runCloudUsageSyncIfDue(async () => "formal-access", "formal-user");
+    const issueCalls = fetchMock.mock.calls.filter(([url]) => url === "https://cloud.example/functions/tokentracker-device-token-issue");
+    const syncCalls = fetchMock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync");
+    expect(issueCalls).toHaveLength(2);
+    expect(syncCalls).toHaveLength(2);
+    expect(JSON.parse(String((syncCalls[0][1] as RequestInit).body))).toMatchObject({ accountId: "test-user" });
+    expect(JSON.parse(String((syncCalls[1][1] as RequestInit).body))).toMatchObject({ accountId: "formal-user", drain: true });
+  });
 });

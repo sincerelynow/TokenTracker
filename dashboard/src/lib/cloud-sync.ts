@@ -3,11 +3,13 @@ import {
   clearCloudDeviceSession,
   emitCloudUsageSynced,
   getCloudUsageReady,
+  getCloudSyncAccountId,
   getLastCloudSyncTs,
   getStoredDeviceSession,
   emitCloudLeaderboardRefreshed,
   setLastCloudSyncTs,
   setStoredDeviceSession,
+  setCloudSyncAccountId,
   type CloudDeviceSession,
 } from "./cloud-sync-prefs";
 import { getLocalApiAuthHeaders } from "./local-api-auth";
@@ -96,7 +98,7 @@ async function resolveMachineIdentity(): Promise<{ machineId: string; deviceName
 /**
  * 用当前登录 JWT 向 InsForge 签发 device token，供本地 `tokentracker sync` 上传到云端。
  */
-async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDeviceSession | null> {
+async function issueDeviceTokenForCloud(accessToken: string, accountId: string): Promise<CloudDeviceSession | null> {
   const baseUrl = getInsforgeRemoteUrl();
   if (!isRemoteHttpBase(baseUrl) || !accessToken) return null;
   const root = baseUrl.replace(/\/$/, "");
@@ -139,6 +141,7 @@ async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDevic
     deviceId,
     issuedAt: typeof data?.created_at === "string" ? data.created_at : new Date().toISOString(),
     baseUrl: root,
+    accountId,
   };
   return session;
 }
@@ -149,10 +152,12 @@ async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDevic
 async function postLocalUsageSync(options: {
   deviceToken: string;
   insforgeBaseUrl?: string;
+  accountId?: string;
   drain?: boolean;
 }): Promise<{ ok?: boolean; code?: number; stdout?: string; stderr?: string }> {
-  const { deviceToken, insforgeBaseUrl, drain } = options;
+  const { deviceToken, insforgeBaseUrl, accountId, drain } = options;
   const body: Record<string, string | boolean> = { deviceToken };
+  if (accountId) body.accountId = accountId;
   if (drain === true) body.drain = true;
   const bu = insforgeBaseUrl || getInsforgeRemoteUrl();
   if (isRemoteHttpBase(bu)) body.insforgeBaseUrl = bu.trim();
@@ -171,13 +176,13 @@ async function postLocalUsageSync(options: {
   return data as { ok?: boolean; code?: number; stdout?: string; stderr?: string };
 }
 
-async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | null>): Promise<CloudDeviceSession | null> {
+async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | null>, accountId: string): Promise<CloudDeviceSession | null> {
   const accessToken = await getAccessToken();
   if (!accessToken) return null;
 
   const current = getStoredDeviceSession();
   const target = getInsforgeRemoteUrl().replace(/\/$/, "");
-  if (current?.baseUrl && current.baseUrl !== target) {
+  if (current && (current.baseUrl !== target || current.accountId !== accountId)) {
     clearCloudDeviceSession();
   }
   const active = getStoredDeviceSession();
@@ -185,42 +190,51 @@ async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | 
     return active;
   }
 
-  const issued = await issueDeviceTokenForCloud(accessToken);
+  const issued = await issueDeviceTokenForCloud(accessToken, accountId);
   if (!issued) return null;
+  if (accountId && getCloudSyncAccountId() !== accountId) return null;
   setStoredDeviceSession(issued);
   return issued;
 }
 
 async function syncCloudUsageWithRecovery(
   getAccessToken: () => Promise<string | null>,
+  accountId: string,
   options: { drain?: boolean } = {},
 ): Promise<string | null> {
   let accessToken = await getAccessToken();
   if (!accessToken) return null;
 
-  let session = await resolveCloudDeviceSession(async () => accessToken);
-  if (!session) return accessToken;
+  let session = await resolveCloudDeviceSession(async () => accessToken, accountId);
+  if (!session) return accountId && getCloudSyncAccountId() !== accountId ? null : accessToken;
+  if (accountId && getCloudSyncAccountId() !== accountId) return null;
 
   try {
     await postLocalUsageSync({
       deviceToken: session.token,
+      accountId,
       insforgeBaseUrl: getInsforgeRemoteUrl(),
       drain: options.drain === true,
     });
+    if (accountId && getCloudSyncAccountId() !== accountId) return null;
     emitCloudUsageSynced();
     return accessToken;
   } catch (error) {
+    if (accountId && getCloudSyncAccountId() !== accountId) return null;
     if (!getStoredDeviceSession()) throw error;
     clearCloudDeviceSession();
     accessToken = await getAccessToken();
     if (!accessToken) throw error;
-    session = await resolveCloudDeviceSession(async () => accessToken);
+    session = await resolveCloudDeviceSession(async () => accessToken, accountId);
     if (!session) throw error;
+    if (accountId && getCloudSyncAccountId() !== accountId) return null;
     await postLocalUsageSync({
       deviceToken: session.token,
+      accountId,
       insforgeBaseUrl: getInsforgeRemoteUrl(),
       drain: options.drain === true,
     });
+    if (accountId && getCloudSyncAccountId() !== accountId) return null;
     emitCloudUsageSynced();
     return accessToken;
   }
@@ -229,12 +243,13 @@ async function syncCloudUsageWithRecovery(
 /**
  * 若开启同步且具备条件：签发（或复用）device token 并运行本地 sync，将 queue 上传到云端。
  */
-export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<string | null>): Promise<void> {
+export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<string | null>, accountId = ""): Promise<void> {
+  if (accountId) setCloudSyncAccountId(accountId);
   const last = getLastCloudSyncTs();
   const cloudUsageReady = getCloudUsageReady();
   if (cloudUsageReady && Date.now() - last < MIN_SYNC_INTERVAL_MS) return;
 
-  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, {
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, accountId, {
     drain: !cloudUsageReady,
   });
   if (!accessToken) return;
@@ -245,8 +260,9 @@ export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<strin
 }
 
 /** 用户打开「同步到云端」后立即尝试一次（忽略节流） */
-export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string | null>): Promise<void> {
-  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, { drain: true });
+export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string | null>, accountId = ""): Promise<void> {
+  if (accountId) setCloudSyncAccountId(accountId);
+  const accessToken = await syncCloudUsageWithRecovery(getAccessToken, accountId, { drain: true });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
   if (await triggerLeaderboardRefresh(accessToken, "cloud-sync-now")) {

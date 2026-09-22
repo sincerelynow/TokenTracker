@@ -3,7 +3,7 @@
 ## Summary
 
 - Status: Passed; ready to archive
-- Verified revision: 2
+- Verified revision: 3
 - Executor: Codex
 - Started at: 2026-09-22
 - Completed at: 2026-09-22
@@ -19,6 +19,8 @@
 | VER-005 | yes | REQ-001–003 / 真实个人实例 | test 账号邮箱登录、设备码批准、真实两次上传、远端私有/公共 RPC 与 Edge 查询 | Pass | 用户批准新设备码；真实 ingest 写入 4 条，二次不写入；私有 RPC 四 root 和账户总量正确；公开社区 200；排行榜初次因缺定价辅助函数 500，补迁移后刷新 200、1 条快照 | 用户与 Codex |
 | VER-006 | yes | AC-001–004 / 文档一致性 | 对照 spec、设计、代码与部署说明 | Pass | fork 工作流、隐私、部署、设备验证地址更新；补充 localhost 代理配置要求及登录直达链接；修复本地 Dashboard 登录判定和设备页登录入口 | Codex |
 | VER-007 | yes | REQ-004 / 空实例部署和权限 | CLI 迁移/函数清单、RPC、公有调用、匿名 SDK 私有访问检查、重复 `migrations up --all` | Pass | appkey `8g8s7g8b`：37 迁移、23 active 函数；重复迁移 0 pending；真实发码、ingest、社区和排行榜 200；匿名私有表读写拒绝 42501，匿名账户 Edge 返回 401；服务端 secrets 已部署。CLI 禁止通过 SQL `SET ROLE` 模拟认证角色；真实账号通过设备 JWT 授权完成验证 | Codex |
+| VER-008 | yes | REQ-005 / 本地配置与公开字段 | `node --test test/local-cloud-config.test.js test/runtime-config.test.js test/local-api-security.test.js`；检查接口只返回 URL/公开 anon key、配置变更后更新、缺项禁用和非 GET 拒绝 | Pass | 32/32 通过；公开接口仅返回 `baseUrl` / `anonKey`，配置文件更新后读取新值，缺 key 返回空值，POST 返回 405；无设备令牌暴露 | Codex |
+| VER-009 | yes | REQ-005 / Dashboard 登录配置 | `cd dashboard && npm run test -- --run src/lib/insforge-config.test.ts src/lib/cloud-sync.test.ts`、`npm run typecheck`；从仓库根目录清空四项 InsForge/legacy VITE 环境变量后运行 `npm run dashboard:build` | Pass | Dashboard 8/8 通过，包含本地运行时配置优先级、缺项禁用、旧服务端回退与远程托管仅使用构建配置；类型检查和无 VITE 构建通过；`npm run validate:guardrails`、`git diff --check` 通过。桌面 APP 测试按用户要求不执行 | Codex |
 | VER-ARCHIVE-GATE | no | Workflow archive gate | `python3 /Users/lihairui/.agents/skills/open-spec-workflow/scripts/change_gate.py validate --repo /Volumes/NV3500/Java/project/TokenTracker --change openspec/changes/005-use-personal-insforge-sync --phase archive` | Not Run | 归档是独立操作，仅在用户明确授权后执行 | Codex |
 
 ## Acceptance Review
@@ -29,6 +31,7 @@
 | AC-002 | 新实例重传且连续同步幂等、失败不推进 | Pass | 真实账号首次写入 4 条、二次 0 条，失败回归测试通过；VER-002, VER-005 |
 | AC-003 | 四 root 独立且公共汇总不重算、不泄露路径 | Pass | 私有精确值、公开 303/707、总量 1010，载荷无绝对路径；VER-003, VER-005 |
 | AC-004 | 空实例建立应用对象、匿名私有访问被拒绝 | Pass | 37 迁移、23 函数、匿名 42501/401、真实账号授权及 ingest；VER-007, VER-005 |
+| AC-005 | 本地完整配置启用登录；缺项禁用；公开接口不泄露私密字段；远程托管沿用构建配置 | Pass | VER-008 证实本地配置接口与私密字段边界；VER-009 证实 Dashboard 配置判定、远程托管行为及无 VITE 构建；认证 Provider 挂载前加载配置的代码核对完成 |
 
 ## Deviations
 
@@ -45,5 +48,5 @@
 
 ## Handoff
 
-- Current status: `ready_to_archive`
-- Next action: 等待用户单独明确授权归档；届时运行 archive gate 并归档本 change。代码未提交或发布。
+- Current status: `ready_to_archive` (revision 3)。修订版 2 的验证证据保留在上方。
+- Next action: 等待用户单独明确授权归档；届时运行 archive gate。代码未提交或发布。

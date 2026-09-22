@@ -1700,6 +1700,24 @@ function createLocalApiHandler({ queuePath }) {
       return true;
     }
 
+    // Public client settings for the local dashboard. Read on every request so
+    // editing config.json takes effect after a page reload, without a rebuild.
+    if (p === "/functions/tokentracker-cloud-config") {
+      if (String(req.method || "GET").toUpperCase() !== "GET") {
+        json(res, { error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      const runtime = getRuntimeConfig();
+      const baseUrl = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
+      const anonKey = typeof runtime.anonKey === "string" ? runtime.anonKey.trim() : "";
+      res.setHeader?.("Cache-Control", "no-store");
+      json(res, {
+        baseUrl: baseUrl && baseUrl.startsWith("https://") && anonKey ? baseUrl : "",
+        anonKey: baseUrl && baseUrl.startsWith("https://") && anonKey ? anonKey : "",
+      });
+      return true;
+    }
+
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
       const runtime = getRuntimeConfig();
@@ -2049,6 +2067,9 @@ function createLocalApiHandler({ queuePath }) {
         }
         if (typeof body.deviceToken === "string" && body.deviceToken.trim()) {
           extraEnv.TOKENTRACKER_DEVICE_TOKEN = body.deviceToken.trim();
+        }
+        if (typeof body.accountId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(body.accountId)) {
+          extraEnv.TOKENTRACKER_SYNC_ACCOUNT_ID = body.accountId;
         }
         let localSyncBaseUrl = null;
         if (body.insforgeBaseUrl != null) {

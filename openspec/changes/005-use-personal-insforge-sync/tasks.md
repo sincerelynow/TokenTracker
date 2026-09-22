@@ -40,6 +40,16 @@
 - [x] 5.1 所有 required 检查通过后将 SEP 标记为 `ready_to_archive`。
 - [x] 5.2 更新 handoff，等待用户单独授权归档。
 
+## Revision 3: 本地 Dashboard 运行时登录配置
+
+前述已勾选任务和验证属于修订版 2。修订版 3 的规划包含当前工作树中已有的实现，下面的审批和验证状态仍按本修订版单独记录。
+
+- [x] 5.3 用户在修订版 3 规划完成后明确批准核对当前实现并完成新增验证；SEP 已记录批准版本与证据。
+- [x] 5.4 核对 `src/lib/local-api.js`、`dashboard/src/lib/insforge-config.ts`、`dashboard/src/main.jsx`、`dashboard/vite.config.js` 与 `docs/personal-insforge.md`：本地运行时读取公开配置，远程构建配置保持兼容 — Verifies: REQ-005。
+- [x] 5.5 核对测试资产 `test/local-cloud-config.test.js`、`dashboard/src/lib/insforge-config.test.ts` 覆盖完整配置、缺失配置、动态刷新和公开字段边界 — Covers: REQ-005。
+- [x] 5.6 独立执行 CLI 定向测试、Dashboard 单元测试、类型检查与无 `VITE_INSFORGE_*` 构建，并记录结果 — Evidence: VER-008, VER-009。
+- [x] 5.7 核对 AC-005、文档和回滚方式，重新满足 `ready_to_archive` 门禁。
+
 ## 6. Archive
 
 - [ ] 6.1 [ARCHIVE-ACTION] 用户在 `ready_to_archive` 后授权时，记录证据并运行 archive gate。

@@ -155,6 +155,11 @@ function installDeviceTokenFetch(fetchCalls) {
   };
 }
 
+test("local-api forwards the signed-in account identity to sync", async () => {
+  const call = await runLocalSync({ accountId: "user-123", drain: true });
+  assert.equal(call.options.env.TOKENTRACKER_SYNC_ACCOUNT_ID, "user-123");
+});
+
 test("local-api forwards strict boolean auto background sync", async () => {
   const call = await runLocalSync({ auto: true, background: true, nativeOnlyWsl: true });
   const args = call.args;

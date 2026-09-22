@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getOrCreateInsforgeClient, isCloudInsforgeConfigured } from "../lib/insforge-config";
-import { clearCloudDeviceSession, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
+import { resetCloudSyncAccountState, setCloudSyncAccountId, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
 import { getPublicVisibility } from "../lib/api";
 import { clearLocalApiAuthToken, getLocalApiAuthHeaders } from "../lib/local-api-auth";
@@ -69,6 +69,10 @@ export function InsforgeAuthProvider({ children }) {
   const [client, setClient] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!loading) setCloudSyncAccountId(typeof user?.id === "string" ? user.id : "");
+  }, [loading, user?.id]);
 
   useEffect(() => {
     if (!isCloudInsforgeConfigured()) {
@@ -235,7 +239,8 @@ export function InsforgeAuthProvider({ children }) {
   const signOut = useCallback(async () => {
     if (!client) return;
     await client.auth.signOut();
-    clearCloudDeviceSession();
+    resetCloudSyncAccountState();
+    setCloudSyncAccountId("");
     // Cloud sync requires an authenticated session, so disable it on sign-out.
     // This also keeps signed-out dashboard loads instant: AccountViewContext's
     // `resolving` gate only engages when cloud is the likely scope

@@ -53,6 +53,29 @@
 - **Then** 同步所需表、RPC、函数可用，重复执行检查不会重复创建用量数据
 - **And** 未认证用户无法直接读取或修改他人的私有用量
 
+### Requirement: REQ-005 本地 Dashboard 使用运行时云配置登录
+
+系统 SHALL 在本地 Dashboard 启动时读取 CLI 配置中的有效 HTTPS `baseUrl` 与公开 `anonKey`，并允许用户从“设置 → 账户”登录，无需 `VITE_INSFORGE_*` 构建配置；缺失任一配置时 SHALL 禁用云登录。远程托管 Dashboard SHALL 继续使用显式构建配置。
+
+#### Scenario: 仅配置本地 config.json
+
+- **Given** Dashboard 构建未注入 `VITE_INSFORGE_*`，CLI `config.json` 包含有效 `baseUrl` 与 `anonKey`
+- **When** 用户打开本地 Dashboard 的“设置 → 账户”
+- **Then** 登录入口可用，认证请求使用该个人实例
+- **And** 修改本地配置后刷新页面即可读取新配置，无需重建 Dashboard
+
+#### Scenario: 本地配置不完整
+
+- **Given** CLI `config.json` 缺少有效 HTTPS URL 或公开 anon key
+- **When** 用户打开本地 Dashboard
+- **Then** 云登录保持禁用，且不得使用旧构建配置连接其他实例
+
+#### Scenario: 远程托管 Dashboard
+
+- **Given** Dashboard 在非本地地址托管
+- **When** 用户打开账户页面
+- **Then** 登录能力由显式 `VITE_INSFORGE_BASE_URL` 与 `VITE_INSFORGE_ANON_KEY` 决定
+
 ## Behavior
 
 ### Inputs
@@ -72,6 +95,7 @@
 ### Compatibility
 
 - 本地 queue、现有 InsForge 函数路径和数据格式保持兼容；未配置个人实例的安装仅保留本地功能。
+- 本地 Dashboard 的运行时配置仅包含公开 URL/key；远程托管 Dashboard 的构建配置机制保持兼容。
 
 ## Traceability
 
@@ -81,6 +105,7 @@
 | REQ-002 | 旧实例已有上传偏移 | AC-002 |
 | REQ-003 | 同小时多 root 用量 | AC-003 |
 | REQ-004 | 首次部署与重复核对 | AC-004 |
+| REQ-005 | 仅配置本地 config.json、本地配置不完整、远程托管 Dashboard | AC-005 |
 
 ## Acceptance Criteria
 
@@ -115,3 +140,11 @@
 - **Action** 应用基础和既有 migrations，部署函数，列出远端对象并执行匿名/用户身份的私有用量访问检查。
 - **Expected Result** 所有必需 migrations 与函数在目标实例可见，核心登录/设备令牌/ingest/账户读取可调用；匿名私有读写被拒绝，重复核对不修改用户数据。
 - **Verification** VER-007
+
+### Acceptance Criterion: AC-005 本地配置即可登录
+
+- **Covers** REQ-005 / 仅配置本地 config.json、本地配置不完整、远程托管 Dashboard
+- **Preconditions** 无 `VITE_INSFORGE_*` 的 Dashboard 构建；临时 CLI 配置分别提供完整和不完整的 URL/key；远程托管场景提供显式构建配置。
+- **Action** 启动本地服务并打开“设置 → 账户”，修改配置后刷新页面；分别检查不完整配置和远程托管场景。
+- **Expected Result** 完整配置时登录入口启用且目标为配置的个人实例；刷新后读取更新值；不完整配置时登录禁用且公开配置接口不返回私密字段；远程托管仍按构建配置工作。
+- **Verification** VER-008, VER-009

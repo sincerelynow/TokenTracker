@@ -8,30 +8,36 @@ import { CurrencyProvider } from "./ui/foundation/CurrencyProvider.jsx";
 import { TokenFormatProvider } from "./ui/foundation/TokenFormatProvider.jsx";
 import App from "./App.jsx";
 import { initAnalytics } from "./lib/analytics.js";
+import { loadRuntimeInsforgeConfig } from "./lib/insforge-config";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/700.css";
 import "@fontsource/geist-mono/900.css";
 import "./styles.css";
 
-initAnalytics();
+async function startDashboard() {
+  await loadRuntimeInsforgeConfig();
+  initAnalytics();
 
-const router = createBrowserRouter([
-  { path: "*", element: <App /> },
-]);
+  const router = createBrowserRouter([
+    { path: "*", element: <App /> },
+  ]);
 
-createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <LocaleProvider>
-      <TokenFormatProvider>
-        <CurrencyProvider>
-          <InsforgeAuthProvider>
-            <AccountViewProvider>
-              <RouterProvider router={router} />
-            </AccountViewProvider>
-          </InsforgeAuthProvider>
-        </CurrencyProvider>
-      </TokenFormatProvider>
-    </LocaleProvider>
-  </React.StrictMode>,
-);
+  createRoot(document.getElementById("root")).render(
+    <React.StrictMode>
+      <LocaleProvider>
+        <TokenFormatProvider>
+          <CurrencyProvider>
+            <InsforgeAuthProvider>
+              <AccountViewProvider>
+                <RouterProvider router={router} />
+              </AccountViewProvider>
+            </InsforgeAuthProvider>
+          </CurrencyProvider>
+        </TokenFormatProvider>
+      </LocaleProvider>
+    </React.StrictMode>,
+  );
+}
+
+void startDashboard();

@@ -186,7 +186,9 @@ test("a persisted upstream default does not suppress first publication to a pers
     assert.equal(ingestCalls[0].url, `${PERSONAL_BASE_URL}/functions/tokentracker-ingest`);
     const trackerDir = path.join(home, ".tokentracker", "tracker");
     const state = await readJsonFile(path.join(trackerDir, "queue.state.json"));
-    assert.equal(state.destinations[PERSONAL_BASE_URL].offset, Buffer.byteLength(queue));
+    const accounts = state.destinations[PERSONAL_BASE_URL].accounts;
+    const machines = Object.values(accounts)[0];
+    assert.equal(Object.values(machines)[0].offset, Buffer.byteLength(queue));
   });
 });
 
@@ -670,7 +672,7 @@ test("a partial non-auth upload failure resumes after the committed offset", asy
   });
 });
 
-test("sync does not persist an unverified replacement when the replay queue is empty", async () => {
+test("sync verifies a replacement by replaying local history for a new account checkpoint", async () => {
   await withTempHome(async (home) => {
     const trackerDir = await writeTrackerState(home, {});
     await cmdSync(["--auto"]);
@@ -692,9 +694,9 @@ test("sync does not persist an unverified replacement when the replay queue is e
     await cmdSync(["--auto"]);
 
     const config = await readJsonFile(path.join(trackerDir, "config.json"));
-    assert.equal(config.baseUrl, LEGACY_BASE_URL);
-    assert.equal(config.deviceToken, "legacy-token");
-    assert.equal(ingestCalls, 0);
+    assert.equal(config.baseUrl, undefined);
+    assert.equal(config.deviceToken, "unverified-session-token");
+    assert.equal(ingestCalls, 1);
   });
 });
 

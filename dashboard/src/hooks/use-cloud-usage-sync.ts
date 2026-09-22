@@ -33,10 +33,13 @@ export function useCloudUsageSync(): void {
     let cancelled = false;
     const t = window.setTimeout(() => {
       (async () => {
-        if (cancelled || runRef.current) return;
+        while (runRef.current && !cancelled) {
+          await new Promise((resolve) => window.setTimeout(resolve, 100));
+        }
+        if (cancelled) return;
         runRef.current = true;
         try {
-          await runCloudUsageSyncIfDue(() => insforge.getAccessToken());
+          await runCloudUsageSyncIfDue(() => insforge.getAccessToken(), insforge.user?.id || "");
         } catch (e) {
           console.warn("[tokentracker] cloud usage sync:", e);
         } finally {
@@ -55,5 +58,6 @@ export function useCloudUsageSync(): void {
     insforge.signedIn,
     insforge.loading,
     insforge.getAccessToken,
+    insforge.user?.id,
   ]);
 }

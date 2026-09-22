@@ -10,7 +10,7 @@ Token Tracker 不再隐式连接项目维护者的 InsForge 实例。使用云�
 }
 ```
 
-`baseUrl` 与 `anonKey` 同时供 `sync`、`device-login` 和本地 Dashboard 的认证代理读取；修改后无需重启本地服务。`dashboardUrl` 只在自有托管 Dashboard 时需要改为该站点地址。环境变量 `TOKENTRACKER_INSFORGE_BASE_URL`、`TOKENTRACKER_INSFORGE_ANON_KEY` 和 `TOKENTRACKER_DASHBOARD_URL` 仍可作为临时覆盖项。公开 anon key 可以进入浏览器构建，但 service-role key、OAuth client secret 和数据库凭据只能配置在 InsForge 服务端。
+`baseUrl` 与 `anonKey` 同时供 `sync`、`device-login` 和本地 Dashboard 登录使用；本地 Dashboard 启动时经 CLI 读取公开 URL/key，修改后刷新页面即可生效，无需重新构建 Dashboard。`dashboardUrl` 只在自有托管 Dashboard 时需要改为该站点地址。环境变量 `TOKENTRACKER_INSFORGE_BASE_URL`、`TOKENTRACKER_INSFORGE_ANON_KEY` 和 `TOKENTRACKER_DASHBOARD_URL` 仍可作为临时覆盖项。公开 anon key 可以进入浏览器构建，但 service-role key、OAuth client secret 和数据库凭据只能配置在 InsForge 服务端。
 
 本地 Dashboard 的 `/login` 请求会经过 CLI 服务器的认证代理，并从同一份 `config.json` 读取实例地址。登录页可直接打开 `http://localhost:7680/login`，设备批准页为 `/device`；若使用其他端口，按实际端口访问。
 
@@ -22,9 +22,9 @@ Token Tracker 不再隐式连接项目维护者的 InsForge 实例。使用云�
 EXPECTED_INSFORGE_APPKEY="<your-project-appkey>" bash scripts/deploy-personal-insforge.sh
 ```
 
-部署脚本核对目标项目，应用所有迁移并部署 `dashboard/edge-patches/` 的 23 个 `tokentracker-*` functions。CLI 的项目连接文件 `.insforge/project.json` 及其中的管理 key 必须保持本地且不得提交。还需在自己的 InsForge 控制台配置 OAuth redirect 到自己的 Dashboard。首次切换实例会从本地仍保留的 `queue.jsonl` 重传历史；上传成功后才推进该实例的 checkpoint。不同实例的 checkpoint 互相隔离。
+部署脚本核对目标项目，应用所有迁移并部署 `dashboard/edge-patches/` 的 23 个 `tokentracker-*` functions。CLI 的项目连接文件 `.insforge/project.json` 及其中的管理 key 必须保持本地且不得提交。还需在自己的 InsForge 控制台配置 OAuth redirect 到自己的 Dashboard。上传 checkpoint 按实例 URL、账号 ID 和机器 ID 隔离；首次切换实例或账号时，从本地仍保留的 `queue.jsonl` 重传历史，成功后才推进对应 checkpoint。旧版仅按 URL 记录的进度归属不明，不会阻止首次重传。
 
-设备授权页默认为 `http://localhost:7680/device`；使用自有托管 Dashboard 时，在运行 CLI 的环境中设置 `TOKENTRACKER_DASHBOARD_URL`，并在 InsForge Secrets 中设置同名 URL，使其他客户端拿到同一验证地址。运行本地 Dashboard 前仍需提供上述 `VITE_*` 云配置。旧版配置中指向原站点的 Dashboard URL 会被忽略。
+设备授权页默认为 `http://localhost:7680/device`；使用自有托管 Dashboard 时，在运行 CLI 的环境中设置 `TOKENTRACKER_DASHBOARD_URL`，并在 InsForge Secrets 中设置同名 URL，使其他客户端拿到同一验证地址。本地 Dashboard 不需要 `VITE_*` 云配置；远程托管的 Dashboard 仍需在构建时提供 `VITE_INSFORGE_BASE_URL` 与 `VITE_INSFORGE_ANON_KEY`。旧版配置中指向原站点的 Dashboard URL 会被忽略。
 
 未设置完整 URL/key 时，云功能保持禁用，本地解析和本地统计仍可用。切换实例后应验证：首次同步收到历史、第二次同步不重复增加用量、Codex/DSH root 在私有统计中独立显示且公共统计只显示 provider family。
 

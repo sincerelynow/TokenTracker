@@ -8,15 +8,15 @@
 
 ## Architecture
 
-本地解析与队列保持不变。CLI 运行时配置和 Dashboard 构建配置分别提供同一个人实例 URL/公开 key；两者缺失时云功能停止。认证仍用 InsForge SDK，上传仍用现有 ingest 契约。上传状态绑定规范化的实例 URL，切换实例重新发送本地 queue。云端继续部署现有 edge patches、数据库迁移与 RPC。
+本地解析与队列保持不变。本地 Dashboard 启动时读取 CLI 运行时配置中的个人实例 URL/公开 key；远程托管 Dashboard 使用构建配置。配置缺失时云功能停止。认证仍用 InsForge SDK，上传仍用现有 ingest 契约。上传状态绑定规范化的实例 URL，切换实例重新发送本地 queue。云端继续部署现有 edge patches、数据库迁移与 RPC。
 
 ## Components
 
 | Component | Responsibility | Change |
 | --- | --- | --- |
 | CLI 配置与初始化 | 确定上传/认证目标 | 移除上游默认值，校验个人实例配置 |
-| Dashboard 配置与页面 | 登录、云读取 | 移除上游回退，未配置时禁用云入口 |
-| 本地 API 与云账户代理 | 认证代理、跨设备读取 | 仅接受当前配置目标，不回退 |
+| Dashboard 配置与页面 | 登录、云读取 | 本地挂载认证 Provider 前读取运行时公开配置；远程托管沿用构建配置 |
+| 本地 API 与云账户代理 | 认证代理、跨设备读取 | 仅接受当前配置目标，提供仅含 URL/公开 anon key 的无缓存配置接口 |
 | queue 上传 | 按偏移上传 | 进度按目标实例隔离并安全重放 |
 | InsForge edge functions | ingest 与聚合 | 校验并补齐 root source 家族处理 |
 | 基础 schema 与部署流程 | 空实例建库、增量迁移、函数上线 | 补充基础迁移和可核对部署清单 |
@@ -24,8 +24,8 @@
 
 ## Data Flow
 
-1. 用户在未跟踪的本地/构建配置提供个人实例 URL 和公开 key。
-2. Dashboard 在个人实例登录、签发该实例的设备 token；CLI 上传本地 queue。
+1. 用户在未跟踪的本地 `config.json` 提供个人实例 URL 和公开 key；远程托管站点在构建时提供对应配置。
+2. 本地 Dashboard 启动前从同源 CLI 接口读取公开配置，再在个人实例登录、签发该实例的设备 token；CLI 上传本地 queue。
 3. uploader 读取目标实例专属进度，成功上传后推进该进度；首次目标从零开始。
 4. 个人实例按 `(user, device, hour, source, model)` 保存并聚合 root 行；私有视图保留 root，公共视图折叠为 family。
 
@@ -36,6 +36,12 @@
 - **Choice:** 缺少完整有效配置时明确停用云功能。
 - **Reason:** 避免意外连接上游实例，且不会影响本地优先功能。
 - **Alternatives:** 直接替换为新的硬编码个人 URL；会使配置和后续合并继续脆弱。
+
+### Decision: 本地登录使用 CLI 运行时配置
+
+- **Choice:** `GET /functions/tokentracker-cloud-config` 每次从 CLI 配置解析目标，仅返回有效 HTTPS URL 和公开 anon key，设置 `Cache-Control: no-store`；Dashboard 在挂载认证 Provider 前读取，刷新页面即可应用配置。接口不可用时兼容旧版本地服务的构建配置；收到有效空配置时禁用本地登录。远程托管不读取本地接口。
+- **Reason:** 本地认证代理本就读取 CLI 配置，登录入口应使用同一目标，避免无 `VITE_*` 构建变量时误判未配置。
+- **Alternatives:** 要求用户重新构建 Dashboard；与 CLI 的运行时配置能力重复，且桌面内置包不便重建。
 
 ### Decision: 目的地专属上传进度
 
@@ -58,7 +64,7 @@
 ## Data and API Design
 
 - 基础迁移创建现有应用依赖的 `tokentracker_*` 表、访问控制与 RPC 前置对象；本地上传 checkpoint 增加目标实例身份，旧 checkpoint 视为旧目标的历史状态，不代表新实例完成。
-- CLI: `TOKENTRACKER_INSFORGE_BASE_URL` / `TOKENTRACKER_INSFORGE_ANON_KEY`；Dashboard build: `VITE_INSFORGE_BASE_URL` / `VITE_INSFORGE_ANON_KEY`。服务端密钥不得进入这四项。
+- CLI: `config.json` 中的 `baseUrl` / `anonKey`，可用 `TOKENTRACKER_INSFORGE_BASE_URL` / `TOKENTRACKER_INSFORGE_ANON_KEY` 覆盖；本地 Dashboard 从同源公开配置接口读取。远程 Dashboard build: `VITE_INSFORGE_BASE_URL` / `VITE_INSFORGE_ANON_KEY`。服务端密钥不得进入这些配置或公开接口。
 - `codex-root:<key>`、`dsh-root:<key>` 保持原有 queue 与 ingest 字段；不上传 root 路径。
 
 ## Trade-offs
@@ -79,6 +85,7 @@
 | 上游合并重引入默认 URL | Medium | guardrail 扫描和 CI 测试 |
 | 基础 schema 与既有增量迁移不匹配 | High | 按顺序验证，任何迁移失败立即停止并记录远端状态 |
 | 服务端管理 key 暴露给浏览器 | High | 仅通过 CLI secret 写入 edge 环境，检查公开构建 |
+| 本地配置接口泄露设备令牌或沿用旧目标 | High | 接口白名单返回公开 URL/key；不完整配置返回空值；响应禁用缓存并在页面挂载前读取 |
 
 ## Rollout and Rollback
 

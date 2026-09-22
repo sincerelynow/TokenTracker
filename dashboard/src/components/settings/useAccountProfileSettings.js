@@ -15,7 +15,7 @@ function warnSettingsAction(label, error) {
   console.warn(`[tokentracker] settings ${label}:`, error);
 }
 
-function useCloudSyncControl(getAccessToken, enabled, signedIn) {
+function useCloudSyncControl(getAccessToken, enabled, signedIn, accountId) {
   const [cloudSyncOn, setCloudSyncOn] = useState(() => getCloudSyncEnabled());
   const showLocalCloudSync = enabled && signedIn && isLocalDashboardHost();
 
@@ -25,11 +25,11 @@ function useCloudSyncControl(getAccessToken, enabled, signedIn) {
     setCloudSyncOn(next);
     if (!next) return;
     try {
-      await runCloudUsageSyncNow(() => getAccessToken());
+      await runCloudUsageSyncNow(() => getAccessToken(), accountId);
     } catch (error) {
       warnSettingsAction("cloud sync", error);
     }
-  }, [cloudSyncOn, getAccessToken]);
+  }, [cloudSyncOn, getAccessToken, accountId]);
 
   return { cloudSyncOn, handleCloudSyncToggle, showLocalCloudSync };
 }
@@ -268,7 +268,7 @@ function useGithubActions(state, mutateProfile) {
 export function useAccountProfileSettings() {
   const auth = useInsforgeAuth();
   const state = useProfileState(auth.user);
-  const cloudSync = useCloudSyncControl(auth.getAccessToken, auth.enabled, auth.signedIn);
+  const cloudSync = useCloudSyncControl(auth.getAccessToken, auth.enabled, auth.signedIn, auth.user?.id || "");
   useProfileLoad(auth.getAccessToken, auth.signedIn, state.loadSetters);
   const mutateProfile = useProfileMutation(auth.getAccessToken, state);
   const visibilityActions = useVisibilityActions(state, mutateProfile);

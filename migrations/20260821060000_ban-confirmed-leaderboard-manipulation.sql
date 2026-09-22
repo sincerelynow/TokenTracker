@@ -28,6 +28,11 @@ BEGIN
   JOIN tt_confirmed_ban_targets t USING (user_id)
   WHERE f.status IN ('auto_excluded', 'review');
 
+  -- A newly bootstrapped personal instance has no upstream incident rows.
+  IF v_target_users = 0 AND v_target_flags = 0 THEN
+    RETURN;
+  END IF;
+
   IF v_target_users <> 2 OR v_target_flags <> 3 THEN
     RAISE EXCEPTION
       'confirmed ban target drift: expected 2 users/3 flags, got % users/% flags',

@@ -34,6 +34,10 @@ BEGIN
     AND f.status IN ('auto_excluded', 'review')
     AND f.reviewed_at IS NULL;
 
+  IF v_target_users = 0 AND v_target_flags = 0 THEN
+    RETURN;
+  END IF;
+
   IF v_target_users <> 1 OR v_target_flags <> 2 THEN
     RAISE EXCEPTION
       'verified K8s target drift: expected 1 user/2 flags, got % users/% flags',

@@ -30,9 +30,10 @@ permissions:
 
 jobs:
   probe:
+    if: vars.TOKENTRACKER_INSFORGE_BASE_URL != ''
     runs-on: ubuntu-latest
     env:
-      API: https://srctyff5.us-east.insforge.app/functions/tokentracker-leaderboard
+      API: ${{ vars.TOKENTRACKER_INSFORGE_BASE_URL }}/functions/tokentracker-leaderboard
       # Staleness budgets (hours). Each period's cron cadence + generous slack:
       #   total  — hourly cron, alert if > 25h stale
       #   month  — every 2h cron, alert if > 6h stale

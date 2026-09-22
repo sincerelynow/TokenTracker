@@ -11,6 +11,7 @@ export type CloudDeviceSession = {
   token: string;
   deviceId: string;
   issuedAt: string;
+  baseUrl?: string;
 };
 
 function clearLegacyStoredDeviceSession(): void {

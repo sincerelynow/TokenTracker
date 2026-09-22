@@ -39,6 +39,7 @@ test("cmdDeviceLogin persists the approved device token used by sync", async () 
   const calls = [];
   const originalFetch = global.fetch;
   const originalStdoutWrite = process.stdout.write;
+  let output = "";
   global.fetch = async (url, opts) => {
     calls.push({ url: String(url), body: opts?.body ? JSON.parse(opts.body) : null });
     if (String(url).endsWith("/tokentracker-device-flow-authorize")) {
@@ -80,7 +81,7 @@ test("cmdDeviceLogin persists the approved device token used by sync", async () 
       },
     };
   };
-  process.stdout.write = () => true;
+  process.stdout.write = (chunk) => { output += chunk; return true; };
 
   try {
     await cmdDeviceLogin(["--base-url", "https://example.invalid"], { home, sleep: async () => {} });
@@ -92,6 +93,8 @@ test("cmdDeviceLogin persists the approved device token used by sync", async () 
     assert.equal(config.anonKey, "current-anon-key");
     assert.equal(config.concurrentSetting, "preserved");
     assert.equal(calls.length, 2);
+    assert.match(output, /http:\/\/localhost:7680\/device\?user_code=ABCD-2345/);
+    assert.doesNotMatch(output, /www\.tokentracker\.cc/);
     // Machine-anchored device identity: authorize must carry the SAME
     // machineId that was persisted to config.json, so the server can anchor
     // the issued device to the machine instead of the hostname-derived name.

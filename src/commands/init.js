@@ -106,7 +106,7 @@ const ASCII_LOGO = [
 ].join("\n");
 
 const DIVIDER = "----------------------------------------------";
-const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
+const DEFAULT_DASHBOARD_URL = "http://localhost:7680";
 
 // Single source of truth for the welcome screen's provider count + sample list.
 // test/discovery-metadata.test.js keeps this aligned with public tool copy.
@@ -371,7 +371,9 @@ async function runSetup({
     // Keep a persisted legacy URL until the first sync. sync owns the migration
     // lock and must reset the upload offset/backoff before removing this marker;
     // rewriting it here would skip the historical replay permanently.
-    baseUrl: opts.baseUrl || existingPlainConfig.baseUrl || DEFAULT_BASE_URL,
+    // Do not persist an implicit cloud destination. Users opt in via CLI,
+    // environment, or an explicitly persisted personal instance.
+    baseUrl: opts.baseUrl || existingPlainConfig.baseUrl || undefined,
   };
   if (opts.dashboardUrl) {
     config.dashboardUrl = opts.dashboardUrl;

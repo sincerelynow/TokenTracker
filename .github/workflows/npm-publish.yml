@@ -118,8 +118,8 @@ jobs:
       - name: Build dashboard
         if: steps.version-check.outputs.eligible == 'true' && steps.version-check.outputs.exists == 'false'
         env:
-          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
-          VITE_INSFORGE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY
+          VITE_INSFORGE_BASE_URL: ${{ vars.TOKENTRACKER_INSFORGE_BASE_URL }}
+          VITE_INSFORGE_ANON_KEY: ${{ vars.TOKENTRACKER_INSFORGE_ANON_KEY }}
         run: npm run dashboard:build
 
       - name: Publish to npm

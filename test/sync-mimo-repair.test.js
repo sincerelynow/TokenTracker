@@ -52,8 +52,8 @@ test("repairMimoClaudeMislabel: purges source=mimo from queue + state, keeps oth
       ].join("\n") + "\n",
       "utf8",
     );
-    await fs.writeFile(queueStatePath, JSON.stringify({ offset: 4096 }) + "\n", "utf8");
-    await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 2048 }) + "\n", "utf8");
+    await fs.writeFile(queueStatePath, JSON.stringify({ offset: 4096, destinations: { "https://personal.example": { offset: 4096 } } }) + "\n", "utf8");
+    await fs.writeFile(projectQueueStatePath, JSON.stringify({ offset: 2048, destinations: { "https://personal.example": { offset: 2048 } } }) + "\n", "utf8");
 
     const cursors = {
       version: 1,
@@ -98,6 +98,8 @@ test("repairMimoClaudeMislabel: purges source=mimo from queue + state, keeps oth
     // Upload offsets reset for full replay.
     assert.equal(JSON.parse(await fs.readFile(queueStatePath, "utf8")).offset, 0);
     assert.equal(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).offset, 0);
+    assert.deepEqual(JSON.parse(await fs.readFile(queueStatePath, "utf8")).destinations, {});
+    assert.deepEqual(JSON.parse(await fs.readFile(projectQueueStatePath, "utf8")).destinations, {});
 
     // Backup of the main queue was written.
     const files = await fs.readdir(tmp);

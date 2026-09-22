@@ -1,21 +1,16 @@
-const DEFAULT_BASE_URL = "https://srctyff5.us-east.insforge.app";
-// InsForge projects this product has retired. b46ug8xu was production until
-// the 2026-04-19 migration to srctyff5 (0.5.67, commit 73f461b8); init
-// preserves any persisted config.baseUrl, so installs initialized before the
-// migration stayed pinned to it and kept uploading there until the old
-// project's backend went dark on 2026-07-27 (HTTP 503 on every request).
-// Persisted values naming these hosts must fall back to the current default.
-const LEGACY_INSFORGE_HOSTS = new Set(["b46ug8xu.us-east.insforge.app"]);
-const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
+// Cloud is opt-in; never silently connect to an upstream project.
+const DEFAULT_BASE_URL = null;
+// Older init versions persisted the upstream default URL. Ignore both former
+// defaults when resolving the target. Only b46ug8xu has a restorable device
+// token history; srctyff5 tokens do not belong to a personal instance.
+const LEGACY_INSFORGE_HOSTS = new Set([
+  "b46ug8xu.us-east.insforge.app",
+  "srctyff5.us-east.insforge.app",
+]);
+const RESTORABLE_LEGACY_HOSTS = new Set(["b46ug8xu.us-east.insforge.app"]);
+const DEFAULT_DASHBOARD_URL = "http://localhost:7680";
 const DEFAULT_HTTP_TIMEOUT_MS = 20_000;
-// Public InsForge anon key (JWT, role=anon). Mirrors dashboard/src/lib/insforge-config.ts
-// (PROD_INSFORGE_ANON_KEY) — public by design (ships in the browser bundle and
-// appears in .github/workflows/*.yml). The local server needs it to call the
-// cross-device `tokentracker-account-*` edge functions on the popover's behalf.
-// (Previously this mistakenly used the full-access `ik_*` API key, which has
-// admin access and must never be shipped to clients.)
-const DEFAULT_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY";
+const DEFAULT_ANON_KEY = null;
 
 function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaults = {} } = {}) {
   // Older Windows test runs could leak their fixture HOME and persist
@@ -35,11 +30,11 @@ function resolveRuntimeConfig({ cli = {}, config = {}, env = process.env, defaul
     config.anonKey,
     env?.TOKENTRACKER_INSFORGE_ANON_KEY,
     defaults.anonKey,
-    DEFAULT_ANON_KEY,
+    null,
   );
   const dashboardUrl = pickString(
     cli.dashboardUrl,
-    config.dashboardUrl,
+    normalizePersistedDashboardUrl(config.dashboardUrl),
     env?.TOKENTRACKER_DASHBOARD_URL,
     defaults.dashboardUrl,
     DEFAULT_DASHBOARD_URL,
@@ -130,13 +125,24 @@ function normalizePersistedBaseUrl(value) {
   return normalized;
 }
 
+function normalizePersistedDashboardUrl(value) {
+  const normalized = normalizeString(value);
+  if (normalized === undefined) return undefined;
+  try {
+    if (new URL(normalized).hostname.toLowerCase() === "www.tokentracker.cc") return undefined;
+  } catch {
+    // Keep the existing resolver behavior for explicit custom values.
+  }
+  return normalized;
+}
+
 // True when the value points at a retired InsForge project (dead backend).
 // Callers use this to trigger the one-time config repair in sync.
 function isLegacyInsforgeBaseUrl(value) {
   const normalized = normalizeString(value);
   if (normalized === undefined) return false;
   try {
-    return LEGACY_INSFORGE_HOSTS.has(new URL(normalized).hostname.toLowerCase());
+    return RESTORABLE_LEGACY_HOSTS.has(new URL(normalized).hostname.toLowerCase());
   } catch {
     return false;
   }

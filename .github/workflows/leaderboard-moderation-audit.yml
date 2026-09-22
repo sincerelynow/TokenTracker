@@ -29,9 +29,10 @@ permissions:
 
 jobs:
   audit:
+    if: vars.TOKENTRACKER_INSFORGE_BASE_URL != ''
     runs-on: ubuntu-latest
     env:
-      API: https://srctyff5.us-east.insforge.app/functions/tokentracker-leaderboard-refresh
+      API: ${{ vars.TOKENTRACKER_INSFORGE_BASE_URL }}/functions/tokentracker-leaderboard-refresh
     steps:
       - name: Audit quarantine against the block list
         run: |

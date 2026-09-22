@@ -809,11 +809,10 @@ function normalizeRemoteHttpBaseUrl(value) {
   }
 }
 
-function resolveAllowedInsforgeBaseUrl(value) {
+function resolveAllowedInsforgeBaseUrl(value, runtime = resolveRuntimeConfig()) {
   const requested = normalizeRemoteHttpBaseUrl(value);
   if (!requested) return null;
 
-  const runtime = resolveRuntimeConfig();
   const allowed = new Set(
     [runtime.baseUrl, DEFAULT_BASE_URL]
       .map((entry) => normalizeRemoteHttpBaseUrl(entry))
@@ -1139,6 +1138,22 @@ function buildProxyHeaders(headers) {
 
 function createLocalApiHandler({ queuePath }) {
   const qp = queuePath || resolveQueuePath();
+  const runtimeConfigPath = path.join(path.dirname(qp), "config.json");
+
+  // Read this for each request so an endpoint/key edited in config.json takes
+  // effect without a server restart. The local auth proxy must use the same
+  // target as `sync` and `device-login`; otherwise a config-only setup makes
+  // `/api/auth/*` incorrectly report that InsForge is unavailable.
+  function getRuntimeConfig() {
+    let config = {};
+    try {
+      const parsed = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) config = parsed;
+    } catch {
+      // Missing or malformed optional config keeps cloud features disabled.
+    }
+    return resolveRuntimeConfig({ config, env: process.env });
+  }
 
   // Server-side cookie relay: captures auth cookies from InsForge cloud responses
   // so that both browser and WKWebView share the same login session via the proxy.
@@ -1360,11 +1375,11 @@ function createLocalApiHandler({ queuePath }) {
     const machineId = getOrCreateMachineId(queuePathForMachineId);
     if (!machineId) return null;
 
-    const runtime = resolveRuntimeConfig();
+    const runtime = getRuntimeConfig();
     const baseUrl =
       normalizeRemoteHttpBaseUrl(options.baseUrl) ||
-      normalizeRemoteHttpBaseUrl(runtime.baseUrl) ||
-      normalizeRemoteHttpBaseUrl(DEFAULT_BASE_URL);
+      normalizeRemoteHttpBaseUrl(runtime.baseUrl);
+    if (!baseUrl) return null;
     const cacheKey = localSyncDeviceTokenCacheKey(refreshToken, machineId, baseUrl);
     const cachedToken = localSyncDeviceTokenCache.get(cacheKey);
     if (cachedToken) return cachedToken;
@@ -1386,7 +1401,7 @@ function createLocalApiHandler({ queuePath }) {
       if (rotatedRefreshToken) setRelayRefreshToken(rotatedRefreshToken);
       if (minted.csrfToken) setRelayCsrfToken(minted.csrfToken);
 
-      const root = String(baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+      const root = baseUrl.replace(/\/$/, "");
       const headers = {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -1471,7 +1486,7 @@ function createLocalApiHandler({ queuePath }) {
     if (!getCloudSyncPref()) return ACCOUNT_FALLBACK_CLOUD_SYNC_OFF;
     const refreshToken = getRefreshTokenForCloud();
     if (!refreshToken) return ACCOUNT_FALLBACK_SIGNED_OUT;
-    const runtime = resolveRuntimeConfig();
+    const runtime = getRuntimeConfig();
     const failureKey = `${runtime.baseUrl}\0${refreshToken}`;
     const requestKey = `${failureKey}\0${usageSlug}\0${url.searchParams.toString()}`;
     if (accountViewFailureUntil(failureKey) > Date.now()) {
@@ -1492,7 +1507,7 @@ function createLocalApiHandler({ queuePath }) {
       const out = await fetchAccountUsage({
         usageSlug,
         searchParams: url.searchParams,
-        baseUrl: runtime.baseUrl || DEFAULT_BASE_URL,
+        baseUrl: runtime.baseUrl,
         anonKey: runtime.anonKey,
         refreshToken,
         timeoutMs,
@@ -1520,7 +1535,7 @@ function createLocalApiHandler({ queuePath }) {
       // erroring, but say so: this is a *temporary* downgrade and the client
       // must not treat it as the user's real data scope.
       const reason = classifyAccountFallback(e);
-      if (resolveRuntimeConfig().debug) {
+      if (getRuntimeConfig().debug) {
         console.warn(`[LocalAPI] account view fallback (${reason}) for ${usageSlug}:`, e?.message || e);
       }
       rememberAccountViewFailure(failureKey);
@@ -1687,8 +1702,12 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
-      const runtime = resolveRuntimeConfig();
-      const insforgeBase = runtime.baseUrl || DEFAULT_BASE_URL;
+      const runtime = getRuntimeConfig();
+      const insforgeBase = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
+      if (!insforgeBase) {
+        json(res, { error: "InsForge is not configured" }, 503);
+        return true;
+      }
       try {
         const targetUrl = `${insforgeBase.replace(/\/$/, "")}${p}${url.search || ""}`;
         const proxyHeaders = buildProxyHeaders(req.headers);
@@ -2033,7 +2052,7 @@ function createLocalApiHandler({ queuePath }) {
         }
         let localSyncBaseUrl = null;
         if (body.insforgeBaseUrl != null) {
-          const allowedBaseUrl = resolveAllowedInsforgeBaseUrl(body.insforgeBaseUrl);
+          const allowedBaseUrl = resolveAllowedInsforgeBaseUrl(body.insforgeBaseUrl, getRuntimeConfig());
           if (!allowedBaseUrl) {
             json(res, { ok: false, error: "Unsupported insforgeBaseUrl override" }, 400);
             return true;
@@ -2049,7 +2068,7 @@ function createLocalApiHandler({ queuePath }) {
           try {
             issuedToken = await issueDeviceTokenForLocalSync(qp, { baseUrl: localSyncBaseUrl });
           } catch (e) {
-            if (resolveRuntimeConfig().debug) {
+            if (getRuntimeConfig().debug) {
               console.warn("[LocalAPI] local sync device token issue failed:", e?.message || e);
             }
           }

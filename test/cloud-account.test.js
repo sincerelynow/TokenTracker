@@ -218,6 +218,7 @@ test("fetchAccountFunction forwards query params except account/scope, sets auth
 test("fetchAccountFunction throws with status on non-ok", async () => {
   await assert.rejects(
     () => fetchAccountFunction({
+      baseUrl: "https://personal.example",
       accessToken: "x",
       slug: "tokentracker-account-summary",
       searchParams: new URLSearchParams(),

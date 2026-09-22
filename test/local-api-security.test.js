@@ -3,8 +3,9 @@ const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { Readable } = require("node:stream");
 const { test } = require("node:test");
-const { DEFAULT_BASE_URL } = require("../src/lib/runtime-config");
+const PERSONAL_BASE_URL = "https://personal.example";
 
 function createRequest({ method = "GET", headers = {}, body } = {}) {
   const req = new EventEmitter();
@@ -150,6 +151,61 @@ function createRelayedLoginFixture(prefix, { cloudSyncEnabled = true, includeRef
     },
   };
 }
+
+test("local auth proxy reads its InsForge endpoint from tracker config", async () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "tt-local-auth-config-"));
+  const trackerDir = path.join(tmpHome, ".tokentracker", "tracker");
+  const queuePath = path.join(trackerDir, "queue.jsonl");
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  const previousBaseUrl = process.env.TOKENTRACKER_INSFORGE_BASE_URL;
+  const originalFetch = global.fetch;
+  const calls = [];
+  process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome;
+  delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
+  fs.mkdirSync(trackerDir, { recursive: true });
+  fs.writeFileSync(queuePath, "");
+  fs.writeFileSync(
+    path.join(trackerDir, "config.json"),
+    JSON.stringify({ baseUrl: PERSONAL_BASE_URL, anonKey: "anon_personal" }),
+  );
+  global.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return new Response(JSON.stringify({ password: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const { createLocalApiHandler } = require("../src/lib/local-api");
+    const handler = createLocalApiHandler({ queuePath });
+    const req = Object.assign(Readable.from([]), { method: "GET", headers: {} });
+    const res = createResponse();
+
+    const handled = await handler(
+      req,
+      res,
+      new URL("http://127.0.0.1:7680/api/auth/public-config"),
+    );
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 200, res.body.toString("utf8"));
+    assert.deepEqual(JSON.parse(res.body.toString("utf8")), { password: true });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `${PERSONAL_BASE_URL}/api/auth/public-config`);
+  } finally {
+    global.fetch = originalFetch;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    if (previousBaseUrl === undefined) delete process.env.TOKENTRACKER_INSFORGE_BASE_URL;
+    else process.env.TOKENTRACKER_INSFORGE_BASE_URL = previousBaseUrl;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
 
 test("local sync rejects arbitrary insforgeBaseUrl overrides", async () => {
   const calls = [];
@@ -818,7 +874,7 @@ test("local sync scopes relayed device token cache by InsForge base URL", async 
   const fixture = createRelayedLoginFixture("tt-local-sync-auto-cache-base-url-");
   const prevFetch = global.fetch;
   const fetchCalls = [];
-  const defaultRoot = DEFAULT_BASE_URL.replace(/\/$/, "");
+  const defaultRoot = PERSONAL_BASE_URL.replace(/\/$/, "");
   const tokensByRoot = new Map([
     ["https://cloud.example", "cloud-device-token"],
     [defaultRoot, "default-device-token"],
@@ -872,10 +928,11 @@ test("local sync scopes relayed device token cache by InsForge base URL", async 
     );
     assert.equal(firstRes.statusCode, 200);
 
+    process.env.TOKENTRACKER_INSFORGE_BASE_URL = PERSONAL_BASE_URL;
     const secondReq = createRequest({
       method: "POST",
       headers: { "x-tokentracker-local-auth": localAuthToken },
-      body: JSON.stringify({ insforgeBaseUrl: DEFAULT_BASE_URL }),
+      body: JSON.stringify({ insforgeBaseUrl: PERSONAL_BASE_URL }),
     });
     const secondRes = createResponse();
     assert.equal(

@@ -44,6 +44,10 @@ BEGIN
   JOIN tt_confirmed_template_ban_targets t USING (user_id)
   WHERE f.status IN ('auto_excluded', 'review');
 
+  IF v_target_users = 0 AND v_target_flags = 0 THEN
+    RETURN;
+  END IF;
+
   IF v_target_users <> 1 OR v_target_flags <> 3 THEN
     RAISE EXCEPTION
       'template ban target drift: expected 1 user/3 flags, got % users/% flags',

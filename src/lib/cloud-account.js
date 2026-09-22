@@ -382,7 +382,7 @@ async function fetchAccountUsage({
   usageSlug,
   searchParams,
   baseUrl = DEFAULT_BASE_URL,
-  anonKey = DEFAULT_ANON_KEY,
+  anonKey = null,
   refreshToken,
   fetchImpl = fetch,
   now = Date.now,
@@ -391,6 +391,7 @@ async function fetchAccountUsage({
   const slug = accountSlugFor(usageSlug);
   if (!slug) return null;
   if (!refreshToken) return null;
+  if (typeof baseUrl !== "string" || !/^https?:\/\//i.test(baseUrl.trim())) return null;
 
   const startTime = now();
   const getRemainingTimeout = () => {

@@ -15,7 +15,6 @@
 [![Platform](https://img.shields.io/badge/macOS-supported-lightgrey.svg)](https://www.apple.com/macos/)
 [![GitHub stars](https://img.shields.io/github/stars/xiufengsun/TokenTracker?style=social)](https://github.com/xiufengsun/TokenTracker/stargazers)
 [![阮一峰周刊 #393 收录](https://img.shields.io/badge/%E6%94%B6%E5%BD%95-%E9%98%AE%E4%B8%80%E5%B3%B0%E5%91%A8%E5%88%8A%20%23393-FF6B35?logo=rss&logoColor=white)](https://github.com/ruanyf/weekly/blob/master/docs/issue-393.md)
-[![作者 tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=0652839f-d19f-4f67-af85-6b7675875443&metric=tokens&compact=1&label=author%20tokens)](https://github.com/xiufengsun/TokenTracker)
 
 <br/>
 
@@ -483,9 +482,9 @@ xattr -cr /Applications/TokenTracker.app
 然后贴一段：
 
 ```markdown
-[![tokens](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=tokens)](https://github.com/xiufengsun/TokenTracker)
-[![cost](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=cost)](https://github.com/xiufengsun/TokenTracker)
-[![rank](https://srctyff5.us-east.insforge.app/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=rank)](https://github.com/xiufengsun/TokenTracker)
+[![tokens](https://你的_INSFORGE_实例/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=tokens)](https://github.com/xiufengsun/TokenTracker)
+[![cost](https://你的_INSFORGE_实例/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=cost)](https://github.com/xiufengsun/TokenTracker)
+[![rank](https://你的_INSFORGE_实例/functions/tokentracker-badge-svg?user_id=你的_USER_ID&metric=rank)](https://github.com/xiufengsun/TokenTracker)
 ```
 
 > 链接默认指向 TokenTracker 仓库，每次点击都能帮其他开发者发现 TokenTracker。如果你想让点击跳到你自己的 leaderboard profile、个人主页或 `https://www.tokentracker.cc`，改 URL 即可。

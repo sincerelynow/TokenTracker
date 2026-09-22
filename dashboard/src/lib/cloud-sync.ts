@@ -138,6 +138,7 @@ async function issueDeviceTokenForCloud(accessToken: string): Promise<CloudDevic
     token,
     deviceId,
     issuedAt: typeof data?.created_at === "string" ? data.created_at : new Date().toISOString(),
+    baseUrl: root,
   };
   return session;
 }
@@ -175,8 +176,13 @@ async function resolveCloudDeviceSession(getAccessToken: () => Promise<string | 
   if (!accessToken) return null;
 
   const current = getStoredDeviceSession();
-  if (current && !shouldRotateStoredDeviceSession(current)) {
-    return current;
+  const target = getInsforgeRemoteUrl().replace(/\/$/, "");
+  if (current?.baseUrl && current.baseUrl !== target) {
+    clearCloudDeviceSession();
+  }
+  const active = getStoredDeviceSession();
+  if (active && !shouldRotateStoredDeviceSession(active)) {
+    return active;
   }
 
   const issued = await issueDeviceTokenForCloud(accessToken);

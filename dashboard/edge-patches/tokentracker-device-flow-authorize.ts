@@ -11,8 +11,8 @@
  *   {
  *     device_code: <opaque, ~64 chars>,    // CLI keeps; never shown to user
  *     user_code:   "AB12-CD34",             // user types this in the browser
- *     verification_uri: "https://www.tokentracker.cc/device",
- *     verification_uri_complete: "https://www.tokentracker.cc/device?user_code=AB12-CD34",
+ *     verification_uri: "http://localhost:7680/device",
+ *     verification_uri_complete: "http://localhost:7680/device?user_code=AB12-CD34",
  *     expires_in: 900,                      // seconds
  *     interval: 5                           // poll cadence in seconds
  *   }
@@ -81,6 +81,14 @@ export default async function (req: Request): Promise<Response> {
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL");
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
   const anonKey = Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY");
+  const dashboardUrl = Deno.env.get("TOKENTRACKER_DASHBOARD_URL") ?? "http://localhost:7680";
+  let verificationUri: URL;
+  try {
+    verificationUri = new URL("/device", dashboardUrl);
+    if (!["https:", "http:"].includes(verificationUri.protocol)) throw new Error("invalid protocol");
+  } catch {
+    return json({ error: "misconfigured dashboard URL" }, 500);
+  }
   if (!baseUrl) return json({ error: "misconfigured" }, 500);
   if (!serviceRoleKey) return json({ error: "misconfigured" }, 500);
 
@@ -113,8 +121,8 @@ export default async function (req: Request): Promise<Response> {
       return json({
         device_code,
         user_code,
-        verification_uri: "https://www.tokentracker.cc/device",
-        verification_uri_complete: `https://www.tokentracker.cc/device?user_code=${encodeURIComponent(user_code)}`,
+        verification_uri: verificationUri.toString(),
+        verification_uri_complete: `${verificationUri.toString()}?user_code=${encodeURIComponent(user_code)}`,
         expires_in: 900,
         interval: 5,
       });

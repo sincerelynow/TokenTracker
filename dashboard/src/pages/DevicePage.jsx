@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext";
 import { copy } from "../lib/copy";
-import { getOrCreateInsforgeClient } from "../lib/insforge-config";
+import { getInsforgeRemoteUrl, getOrCreateInsforgeClient } from "../lib/insforge-config";
 
 /**
  * /device — OAuth-style device flow approval page.
@@ -21,9 +22,8 @@ function buildGrantUrl() {
   const client = getOrCreateInsforgeClient();
   // SDK doesn't expose its baseUrl as a public field; fall back to the same
   // VITE env var that initialized the client.
-  const baseUrl =
-    (import.meta.env && import.meta.env.VITE_INSFORGE_BASE_URL) ||
-    "https://srctyff5.us-east.insforge.app";
+  const baseUrl = getInsforgeRemoteUrl();
+  if (!baseUrl) return "";
   return `${baseUrl.replace(/\/$/, "")}/functions/tokentracker-device-flow-grant`;
 }
 
@@ -33,6 +33,7 @@ function normalizeUserCode(s) {
 
 export default function DevicePage() {
   const auth = useInsforgeAuth();
+  const location = useLocation();
   const [userCode, setUserCode] = useState("");
   const [status, setStatus] = useState({ kind: "idle", message: "" });
 
@@ -120,6 +121,12 @@ export default function DevicePage() {
             <p className="text-sm text-amber-700 dark:text-amber-300">
               {copy("device.approval.sign_in_banner")}
             </p>
+            <Link
+              to={`/login?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`}
+              className="mt-2 inline-block text-sm font-medium underline text-amber-800 dark:text-amber-200"
+            >
+              {copy("header.auth.sign_in_aria")}
+            </Link>
           </div>
         ) : null}
 

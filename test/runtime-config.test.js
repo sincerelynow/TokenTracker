@@ -29,14 +29,25 @@ test("resolveRuntimeConfig ignores non-TOKENTRACKER env inputs", () => {
   assert.equal(result.sources.deviceToken, "default");
 });
 
-test("resolveRuntimeConfig recovers from the leaked Windows test base URL", () => {
+test("resolveRuntimeConfig does not recover persisted hosts to an upstream default", () => {
   const recovered = resolveRuntimeConfig({
     config: { baseUrl: "https://example.invalid" },
     env: {},
   });
 
-  assert.equal(recovered.baseUrl, "https://srctyff5.us-east.insforge.app");
+  assert.equal(recovered.baseUrl, null);
   assert.equal(recovered.sources.baseUrl, "default");
+
+  const migrated = resolveRuntimeConfig({
+    config: { baseUrl: "https://srctyff5.us-east.insforge.app" },
+    env: { TOKENTRACKER_INSFORGE_BASE_URL: "https://personal.example" },
+  });
+  assert.equal(migrated.baseUrl, "https://personal.example");
+  assert.equal(migrated.sources.baseUrl, "env");
+  const retiredDashboard = resolveRuntimeConfig({
+    config: { dashboardUrl: "https://www.tokentracker.cc" }, env: {},
+  });
+  assert.equal(retiredDashboard.dashboardUrl, "http://localhost:7680");
 
   const explicit = resolveRuntimeConfig({
     cli: { baseUrl: "https://example.invalid" },

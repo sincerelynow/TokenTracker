@@ -3142,9 +3142,13 @@ async function cmdSync(argv, context = {}) {
     if (opts.publishAccount || (legacyBaseUrlMigration && opts.auto)) {
       const uploadStateBefore = (await readJson(queueStatePath)) || { offset: 0 };
       const queueSizeBefore = await safeStatSize(queuePath);
+      const uploadDestination = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
+      const destinationOffsetBefore = uploadDestination
+        ? Number(uploadStateBefore.destinations?.[uploadDestination]?.offset || 0)
+        : 0;
       const pendingBytesBefore = Math.max(
         0,
-        queueSizeBefore - Number(uploadStateBefore.offset || 0),
+        queueSizeBefore - destinationOffsetBefore,
       );
       // Native publication and every auto-triggered legacy migration share the
       // failure-backoff gate. Intentionally ignore the 30-minute success
@@ -3196,12 +3200,13 @@ async function cmdSync(argv, context = {}) {
           const fallbackDeviceToken = legacyBaseUrlMigration?.previousDeviceToken;
           const replacementDeviceToken = legacyBaseUrlMigration?.replacementDeviceToken;
           const stateAfterFailure = (await readJson(queueStatePath)) || { offset: 0 };
+          const failureDestination = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
           const canFallbackWithoutSplittingHistory =
             (error?.status === 401 || error?.status === 403) &&
             replacementDeviceToken &&
             fallbackDeviceToken &&
             fallbackDeviceToken !== replacementDeviceToken &&
-            Number(stateAfterFailure.offset || 0) === 0;
+            Number(stateAfterFailure.destinations?.[failureDestination]?.offset || 0) === 0;
           if (!canFallbackWithoutSplittingHistory) throw error;
           successfulDeviceToken = fallbackDeviceToken;
           uploadResult = await drainWithToken(successfulDeviceToken);
@@ -3266,7 +3271,11 @@ async function cmdSync(argv, context = {}) {
     // Only the main queue is uploaded by drainQueueToCloud. project.queue.jsonl
     // is local project-usage state, so counting it here creates false backlog
     // and can keep auto retry alive even after cloud sync has drained.
-    const pendingBytes = Math.max(0, queueSize - Number(afterState.offset || 0));
+    const currentDestination = normalizeRemoteHttpBaseUrl(runtime.baseUrl);
+    const pendingBytes = Math.max(0,
+      queueSize - (currentDestination
+        ? Number(afterState.destinations?.[currentDestination]?.offset || 0)
+        : 0));
 
     if (pendingBytes <= 0) {
       await clearAutoRetry(trackerDir);
@@ -3565,6 +3574,7 @@ async function migrateLegacyDeepseekHarnessSource({ cursors, queuePath, queueSta
       state = {};
     }
     state.offset = 0;
+    state.destinations = {};
     state.updatedAt = new Date().toISOString();
     state.note = "reset_after_deepseek_harness_source_migration_2026_08";
     await ensureDir(path.dirname(queueStatePath));
@@ -3921,9 +3931,33 @@ const AUTO_RETRY_MAX_DELAY_MS = 2 * 60 * 60 * 1000;
 const INGEST_SLUG = "tokentracker-ingest";
 const MAX_INGEST_BUCKETS = 500;
 
+function normalizeRemoteHttpBaseUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
 async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, queuePath, queueStatePath, maxBatches = 5, batchSize = 200 }) {
   const state = (await readJson(queueStatePath)) || { offset: 0 };
-  let offset = Number(state.offset || 0);
+  const destination = normalizeRemoteHttpBaseUrl(baseUrl) || String(baseUrl || "").trim();
+  if (!destination) throw new Error("InsForge is not configured");
+  if (!state.destinations || typeof state.destinations !== "object" || Array.isArray(state.destinations)) {
+    state.destinations = {};
+  }
+  const destinationState = state.destinations[destination] || {};
+  // The legacy offset has no destination identity. It may belong to the
+  // upstream project, so treating it as proof that a new project received the
+  // queue would silently discard all historical usage. Replaying is safe:
+  // ingest upserts by the row identity.
+  let offset = Number(destinationState.offset ?? 0);
   let inserted = 0;
   let skipped = 0;
   let batches = 0;
@@ -3974,6 +4008,8 @@ async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, queuePath, que
     batches += 1;
 
     offset = result.nextOffset;
+    state.destinations[destination] = { ...destinationState, offset };
+    // Keep the legacy field aligned for old readers and this active target.
     state.offset = offset;
     state.updatedAt = new Date().toISOString();
     await writeJson(queueStatePath, state);
@@ -4232,6 +4268,7 @@ async function resetGrokRepairUploadOffset(queueStatePath) {
     state = {};
   }
   state.offset = 0;
+  state.destinations = {};
   state.updatedAt = new Date().toISOString();
   state.note = "reset_after_grok_append_only_repair_2026_05_v4";
   await ensureDir(path.dirname(queueStatePath));
@@ -4290,6 +4327,7 @@ async function resetUploadOffsetForMimoRepair(queueStatePath) {
     state = {};
   }
   state.offset = 0;
+  state.destinations = {};
   state.updatedAt = new Date().toISOString();
   state.note = "reset_after_mimo_claude_mislabel_repair_2026_06";
   await ensureDir(path.dirname(queueStatePath));
@@ -4432,6 +4470,7 @@ async function resetUploadOffsetForZcodeRepair(queueStatePath, note) {
     state = {};
   }
   state.offset = 0;
+  state.destinations = {};
   state.updatedAt = new Date().toISOString();
   state.note = note;
   await ensureDir(path.dirname(queueStatePath));
@@ -5037,6 +5076,7 @@ async function repairCodebuddyLogJsonlOverlap({
   let uploadState = {};
   try { uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8")); } catch (_e) {}
   uploadState.offset = 0;
+  uploadState.destinations = {};
   uploadState.updatedAt = new Date().toISOString();
   uploadState.note = "reset_after_codebuddy_log_jsonl_repair_2026_08";
   await ensureDir(path.dirname(queueStatePath));
@@ -5205,6 +5245,7 @@ async function repairWorkbuddyContextUsage({
   let uploadState = {};
   try { uploadState = JSON.parse(await fs.readFile(queueStatePath, "utf8")); } catch (_e) {}
   uploadState.offset = 0;
+  uploadState.destinations = {};
   uploadState.updatedAt = new Date().toISOString();
   uploadState.note = "reset_after_workbuddy_context_usage_repair_2026_08";
   await ensureDir(path.dirname(queueStatePath));
@@ -5683,6 +5724,7 @@ async function repairCodexRescanInflation({
       uploadState = {};
     }
     uploadState.offset = 0;
+    uploadState.destinations = {};
     uploadState.updatedAt = new Date().toISOString();
     uploadState.note = uploadNote;
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
@@ -5695,6 +5737,7 @@ async function repairCodexRescanInflation({
       uploadState = {};
     }
     uploadState.offset = 0;
+    uploadState.destinations = {};
     uploadState.updatedAt = new Date().toISOString();
     uploadState.note = uploadNote;
     await fs.writeFile(projectQueueStatePath, JSON.stringify(uploadState));
@@ -6486,6 +6529,7 @@ async function repairDroidDuplicateSessionInflation({ cursors, queuePath, queueS
       uploadState = {};
     }
     uploadState.offset = 0;
+    uploadState.destinations = {};
     uploadState.updatedAt = new Date().toISOString();
     uploadState.note = "reset_after_droid_dup_session_2026_06";
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
@@ -6679,6 +6723,7 @@ async function repairClaudeQueueFromGroundTruth({
       uploadState = {};
     }
     uploadState.offset = 0;
+    uploadState.destinations = {};
     uploadState.updatedAt = new Date().toISOString();
     uploadState.note = "reset_after_claude_repair_2026_05_v4";
     await fs.writeFile(queueStatePath, JSON.stringify(uploadState));
@@ -6746,6 +6791,7 @@ async function repairClaudeQueueFromGroundTruth({
         st = {};
       }
       st.offset = 0;
+      st.destinations = {};
       st.updatedAt = new Date().toISOString();
       st.note = "reset_after_claude_repair_2026_05_v6";
       await fs.writeFile(projectQueueStatePath, JSON.stringify(st));
@@ -6880,7 +6926,7 @@ async function relabelClaudeMemQueueRows(queuePath, queueStatePath = null) {
   await fs.writeFile(tmpPath, out.join("\n"), "utf8");
   await fs.rename(tmpPath, queuePath);
 
-  if (typeof queueStatePath === "string" && queueStatePath && previousOffset > 0) {
+  if (typeof queueStatePath === "string" && queueStatePath) {
     let state = {};
     try {
       state = JSON.parse(await fs.readFile(queueStatePath, "utf8"));
@@ -6889,6 +6935,7 @@ async function relabelClaudeMemQueueRows(queuePath, queueStatePath = null) {
       state = {};
     }
     state.offset = nextOffset;
+    state.destinations = {};
     state.updatedAt = new Date().toISOString();
     await fs.writeFile(queueStatePath, JSON.stringify(state), "utf8");
   }

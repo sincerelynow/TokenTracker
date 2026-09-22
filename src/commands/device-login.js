@@ -21,7 +21,7 @@ function readBaseUrl(config) {
         process.env.TOKENTRACKER_API_URL,
     },
     config: config || {},
-    env: {},
+    env: process.env,
   }).baseUrl;
 }
 
@@ -80,6 +80,9 @@ async function cmdDeviceLogin(argv = [], options = {}) {
   const configPath = path.join(trackerDir, "config.json");
   const config = (await readJson(configPath)) || {};
   const baseUrl = opts.baseUrl || readBaseUrl(config);
+  if (!baseUrl) {
+    throw new Error("InsForge is not configured. Set TOKENTRACKER_INSFORGE_BASE_URL or pass --base-url.");
+  }
 
   const clientInfo = `${os.platform()}-${os.arch()} ${os.hostname()}`;
   // Same machineId the local API serves to the dashboard — both login paths
@@ -88,6 +91,12 @@ async function cmdDeviceLogin(argv = [], options = {}) {
   const machineId = getOrCreateMachineId(path.join(trackerDir, "queue.jsonl"));
   process.stdout.write(`Requesting device code from ${baseUrl}...\n`);
   const authResp = await authorize({ baseUrl, clientInfo, machineId });
+  // The authorization service has no knowledge of a CLI's local or custom
+  // dashboard. Ignore any server-provided link from an older deployment.
+  const dashboardUrl = resolveRuntimeConfig({ config, env: process.env }).dashboardUrl;
+  const verificationUri = new URL("/device", dashboardUrl).toString();
+  authResp.verification_uri = verificationUri;
+  authResp.verification_uri_complete = `${verificationUri}?user_code=${encodeURIComponent(authResp.user_code)}`;
 
   if (opts.json) {
     process.stdout.write(JSON.stringify(authResp, null, 2) + "\n");

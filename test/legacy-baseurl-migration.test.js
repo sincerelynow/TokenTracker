@@ -683,6 +683,7 @@ test("sync verifies a replacement by replaying local history for a new account c
         deviceToken: "legacy-token",
         machineId: "machine-1",
       },
+      queue: sampleQueueLine(),
       queueState: { offset: 0 },
     });
     process.env.TOKENTRACKER_DEVICE_TOKEN = "unverified-session-token";

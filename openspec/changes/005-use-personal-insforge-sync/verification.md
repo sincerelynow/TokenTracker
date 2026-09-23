@@ -8,6 +8,13 @@
 - Started at: 2026-09-22
 - Completed at: 2026-09-22
 
+## Post-merge Verification (2026-09-23)
+
+- 将 `origin/main` 合入功能分支后，`npm run ci:local` 通过：Node 3005 通过、2 跳过，copy/locale/UI/架构/版本校验与 Dashboard 构建通过。
+- `npm --prefix dashboard test` 在无并行负载下 792/792 通过；并行首轮有 1 项排行榜页面测试超过 5 秒超时，单独复跑已通过。`npm --prefix dashboard run typecheck` 通过。
+- 个人实例相关定向 Node 测试 75/75 通过；另对云端热力图缓存与旧地址迁移测试复跑 50/50 通过。新增热力图测试显式使用测试云地址，迁移测试显式提供待重放的本地队列，确保继续验证 REQ-001/REQ-002 的无默认目标与历史重传契约。
+- 本次仅合并代码和验证；未重新部署个人实例的迁移或 edge functions，也未重复执行真实账号验收。此前 VER-005/VER-007 的远端证据仍对应 2026-09-22 已部署版本。
+
 ## Checks
 
 | ID | Required | Requirement/Scenario | Command or method | Result | Evidence/Notes | Owner |
@@ -49,4 +56,4 @@
 ## Handoff
 
 - Current status: `ready_to_archive` (revision 3)。修订版 2 的验证证据保留在上方。
-- Next action: 等待用户单独明确授权归档；届时运行 archive gate。代码未提交或发布。
+- Next action: 等待用户单独明确授权归档；届时运行 archive gate。本次合并不会自动发布 npm、桌面包或部署个人实例。

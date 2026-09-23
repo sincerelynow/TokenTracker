@@ -1267,6 +1267,12 @@ export default defineConfig(({ mode }) => {
   const fallbackVersion = loadAppVersion();
   const define = {};
 
+  if (!env.VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES && process.env.TOKENTRACKER_ENABLE_COMMUNITY_FEATURES) {
+    define["import.meta.env.VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES"] = JSON.stringify(
+      process.env.TOKENTRACKER_ENABLE_COMMUNITY_FEATURES,
+    );
+  }
+
   if (!env.VITE_APP_VERSION && fallbackVersion) {
     define["import.meta.env.VITE_APP_VERSION"] = JSON.stringify(fallbackVersion);
   }

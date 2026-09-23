@@ -16,6 +16,8 @@ Token Tracker 不再隐式连接项目维护者的 InsForge 实例。使用云�
 
 若使用本 fork 的 GitHub Actions 构建或发布，在仓库 Variables 中配置 `TOKENTRACKER_INSFORGE_BASE_URL` 与 `TOKENTRACKER_INSFORGE_ANON_KEY`。未配置时构建产物不包含云实例目标，三个排行榜监控工作流会跳过运行。
 
+社区功能在本分支默认关闭。需要排行榜、成就和公共资料时，在 Dashboard 构建环境设置 `TOKENTRACKER_ENABLE_COMMUNITY_FEATURES=true`；Vite 构建会将它映射为 `VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES`，也可以直接设置该 `VITE_` 变量。GitHub repository Variables 中同样设置 `TOKENTRACKER_ENABLE_COMMUNITY_FEATURES=true`，才会启用三个排行榜 GitHub Actions。未设置、设置为 `false` 或其他值都会保持关闭。该开关不会停用个人同步，`TOKENTRACKER_INSFORGE_BASE_URL` 仍独立用于登录、设备授权和用量上传。改回非 `true` 值或删除变量并重新构建 Dashboard 即可恢复关闭状态；不需要删除数据库 migration 或历史数据。
+
 空实例可从 `migrations/20260701000000_bootstrap-tokentracker.sql` 开始按版本部署，后续迁移包含基础 RPC、徽章与历史增量。三条针对上游历史作弊账号的迁移在无匹配记录的空实例上会跳过。链接自己的项目、在 InsForge Secrets 中设置 `INSFORGE_SERVICE_ROLE_KEY` 与 `LEADERBOARD_REFRESH_SECRET` 后运行：
 
 ```bash

@@ -80,6 +80,7 @@ function installLocalStorageMock() {
 describe("cloud usage sync", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
     installLocalStorageMock();
     clearCloudDeviceSession();
   });
@@ -146,6 +147,35 @@ describe("cloud usage sync", () => {
 
     expect(onLeaderboardRefresh).not.toHaveBeenCalled();
     window.removeEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
+  });
+
+  it("keeps personal upload enabled but skips leaderboard refresh when community features are disabled", async () => {
+    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "false");
+    const fetchMock = installFetchMock();
+
+    await runCloudUsageSyncNow(async () => "access-token");
+
+    expect(getLocalSyncBody(fetchMock)).toMatchObject({
+      deviceToken: "device-token",
+      drain: true,
+      insforgeBaseUrl: "https://cloud.example",
+    });
+    expect(fetchMock.mock.calls.some(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")).toBe(false);
+    vi.unstubAllEnvs();
+  });
+
+  it("keeps personal upload enabled and skips leaderboard refresh by default", async () => {
+    vi.unstubAllEnvs();
+    const fetchMock = installFetchMock();
+
+    await runCloudUsageSyncNow(async () => "access-token");
+
+    expect(getLocalSyncBody(fetchMock)).toMatchObject({
+      deviceToken: "device-token",
+      drain: true,
+      insforgeBaseUrl: "https://cloud.example",
+    });
+    expect(fetchMock.mock.calls.some(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")).toBe(false);
   });
 
   it("keeps scheduled sync lightweight after cloud usage is ready", async () => {

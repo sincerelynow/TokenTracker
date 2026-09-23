@@ -11,6 +11,7 @@ import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
 import { AppLayout } from "./ui/components/Sidebar.jsx";
 import { ToastProvider } from "./ui/components/Toast.jsx";
+import { isCommunityFeaturesEnabled } from "./lib/community-features.js";
 import {
   getLeaderboardPreloadContextKey,
   markDashboardMainContentVisible,
@@ -137,6 +138,7 @@ export default function App() {
   // Standalone shareable profile page: /u/:userId (public, anonymous-visible).
   const profileMatch = normalizedPath.match(/^\/u\/([^/]+)$/i);
   const profileUserId = profileMatch ? profileMatch[1] : null;
+  const communityFeaturesEnabled = isCommunityFeaturesEnabled();
 
   const cloudAuthSignedIn = Boolean(insforge.enabled && insforge.signedIn);
   const signedIn = isLocalMode || cloudAuthSignedIn;
@@ -154,6 +156,7 @@ export default function App() {
           : "unavailable";
 
   const tryPreloadLeaderboardDefaultState = useCallback(() => {
+    if (!communityFeaturesEnabled) return;
     if (!dashboardMainContentVisibleRef.current) return;
     if (!mockEnabled && insforge.loading) return;
     if (!mockEnabled && !signedIn) return;
@@ -171,6 +174,7 @@ export default function App() {
     void preloadLeaderboardDefaultState(preloadOptions);
   }, [
     cloudAuthSignedIn,
+    communityFeaturesEnabled,
     insforge.loading,
     insforge.user?.id,
     leaderboardAccessMode,
@@ -206,6 +210,10 @@ export default function App() {
       userId: insforge.user?.id || null,
     };
   }, [cloudAuthSignedIn, insforge]);
+
+  if (!communityFeaturesEnabled && (isLeaderboardPath || normalizedPath === "/achievements" || profileUserId)) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   let gate = isLocalMode || mockEnabled || screenshotMode ? "dashboard" : "landing";
   if (normalizedPath === "/landing") gate = "landing";

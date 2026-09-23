@@ -173,6 +173,7 @@ function renderApp(initialPath = "/dashboard") {
 describe("App deferred dashboard preload", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
     insforgeMock.enabled = true;
     insforgeMock.signedIn = true;
     insforgeMock.loading = false;

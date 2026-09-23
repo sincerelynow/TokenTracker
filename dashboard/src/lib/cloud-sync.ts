@@ -13,6 +13,7 @@ import {
   type CloudDeviceSession,
 } from "./cloud-sync-prefs";
 import { getLocalApiAuthHeaders } from "./local-api-auth";
+import { isCommunityFeaturesEnabled } from "./community-features.js";
 
 const MIN_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const DEVICE_TOKEN_ROTATE_AFTER_MS = 12 * 60 * 60 * 1000;
@@ -254,7 +255,7 @@ export async function runCloudUsageSyncIfDue(getAccessToken: () => Promise<strin
   });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
-  if (await triggerLeaderboardRefresh(accessToken, "cloud-sync-auto")) {
+  if (isCommunityFeaturesEnabled() && await triggerLeaderboardRefresh(accessToken, "cloud-sync-auto")) {
     emitCloudLeaderboardRefreshed();
   }
 }
@@ -265,7 +266,7 @@ export async function runCloudUsageSyncNow(getAccessToken: () => Promise<string 
   const accessToken = await syncCloudUsageWithRecovery(getAccessToken, accountId, { drain: true });
   if (!accessToken) return;
   setLastCloudSyncTs(Date.now());
-  if (await triggerLeaderboardRefresh(accessToken, "cloud-sync-now")) {
+  if (isCommunityFeaturesEnabled() && await triggerLeaderboardRefresh(accessToken, "cloud-sync-now")) {
     emitCloudLeaderboardRefreshed();
   }
 }

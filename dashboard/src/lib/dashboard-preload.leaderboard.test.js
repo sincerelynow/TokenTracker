@@ -26,6 +26,7 @@ function deferred() {
 
 describe("leaderboard default state preload", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
     resetDashboardPreload();
     getLeaderboard.mockReset();
     window.localStorage.clear();

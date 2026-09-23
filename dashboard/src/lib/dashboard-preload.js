@@ -1,4 +1,5 @@
 import { getLeaderboard } from "./api";
+import { isCommunityFeaturesEnabled } from "./community-features.js";
 
 export const DASHBOARD_PRELOAD_TARGETS = Object.freeze(["limits", "leaderboard"]);
 
@@ -253,8 +254,11 @@ export function preloadDashboardPageResource(targetKey, options = {}) {
 
 export function preloadDashboardPageResources(options = {}) {
   const loaders = options.loaders || {};
+  const targetKeys = isCommunityFeaturesEnabled()
+    ? DASHBOARD_PRELOAD_TARGETS
+    : DASHBOARD_PRELOAD_TARGETS.filter((targetKey) => targetKey !== "leaderboard");
   return Promise.all(
-    DASHBOARD_PRELOAD_TARGETS.map((targetKey) =>
+    targetKeys.map((targetKey) =>
       preloadDashboardPageResource(targetKey, { loader: loaders[targetKey] }),
     ),
   );
@@ -381,6 +385,7 @@ function publishSkippedLeaderboardState(reason, contextKey) {
 }
 
 export function preloadLeaderboardDefaultState(options = {}) {
+  if (!isCommunityFeaturesEnabled()) return Promise.resolve(null);
   const sessionAtStart = session;
   const mockEnabled = Boolean(options.mockEnabled);
   const baseUrl = options.baseUrl ?? "";

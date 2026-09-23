@@ -3,7 +3,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AppLayout } from "./Sidebar.jsx";
+import { AppLayout, getNavGroups } from "./Sidebar.jsx";
 
 const LABELS = {
   "nav.group.general": "General",
@@ -83,6 +83,12 @@ describe("AppLayout sidebar controls", () => {
       removeListener: (_listener) => {},
       dispatchEvent: vi.fn(),
     }));
+  });
+
+  it("omits community navigation when community features are disabled", () => {
+    const items = getNavGroups(false).flatMap((group) => group.items);
+    expect(items.some((item) => item.to === "/leaderboard")).toBe(false);
+    expect(items.some((item) => item.to === "/achievements")).toBe(false);
   });
 
   it("collapses and expands the desktop sidebar and persists the preference", async () => {

@@ -19,6 +19,7 @@ vi.mock("./cloud-sync", () => ({
 
 describe("dashboard preload silent side effects", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
     resetDashboardPreload();
     getLeaderboard.mockReset();
     refreshLeaderboard.mockReset();

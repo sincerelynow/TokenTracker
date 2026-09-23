@@ -27,10 +27,11 @@ import { useLocale } from "../../hooks/useLocale.js";
 import { shouldFetchGithubStars } from "../dashboard/util/should-fetch-github-stars.js";
 import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
 import { isNativeApp, isNativeEmbed, isNativeWindowsApp } from "../../lib/native-bridge.js";
+import { isCommunityFeaturesEnabled } from "../../lib/community-features.js";
 
 const STORAGE_KEY = "tt.sidebarCollapsed";
 
-export function getNavGroups() {
+export function getNavGroups(communityFeaturesEnabled = isCommunityFeaturesEnabled()) {
   // copy() must be called at render time so locale switches apply.
   // Validator regex picks up these literal calls.
   return [
@@ -41,8 +42,12 @@ export function getNavGroups() {
         { id: "usage", to: "/dashboard", icon: BarChart3, label: copy("nav.usage") },
         { id: "sessions", to: "/sessions", icon: History, label: copy("nav.sessions") },
         { id: "limits", to: "/limits", icon: Gauge, label: copy("nav.limits") },
-        { id: "leaderboard", to: "/leaderboard", icon: Trophy, label: copy("nav.leaderboard") },
-        { id: "achievements", to: "/achievements", icon: Award, label: copy("nav.achievements") },
+        ...(communityFeaturesEnabled
+          ? [
+              { id: "leaderboard", to: "/leaderboard", icon: Trophy, label: copy("nav.leaderboard") },
+              { id: "achievements", to: "/achievements", icon: Award, label: copy("nav.achievements") },
+            ]
+          : []),
       ],
     },
     {
@@ -329,7 +334,8 @@ function SidebarBody({
   // Re-compute copy() via getNavGroups when locale changes, otherwise the
   // labels stay stale after a language switch.
   const { resolvedLocale } = useLocale();
-  const navGroups = useMemo(() => getNavGroups(), [resolvedLocale]);
+  const communityFeaturesEnabled = isCommunityFeaturesEnabled();
+  const navGroups = useMemo(() => getNavGroups(communityFeaturesEnabled), [communityFeaturesEnabled, resolvedLocale]);
 
   return (
     <>

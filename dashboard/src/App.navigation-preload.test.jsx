@@ -179,8 +179,18 @@ async function startPendingPreload(user) {
 describe("App navigation while preload is pending", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
     window.history.pushState({}, "", "/");
   });
+
+  it.each(["/leaderboard", "/achievements", "/u/user-1"])(
+    "redirects community deep link %s when community features are disabled",
+    async (path) => {
+      vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "false");
+      renderApp(path);
+      expect(await screen.findByText(TEXT.dashboard)).toBeInTheDocument();
+    },
+  );
 
   it("switches to /limits without waiting for pending preload promises", async () => {
     const user = userEvent.setup();

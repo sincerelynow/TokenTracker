@@ -5,12 +5,14 @@ import { copy } from "../../lib/copy";
 import { useAccountProfileSettings } from "./useAccountProfileSettings.js";
 import { PublicProfileFields, SignedOutAccountSection } from "./AccountSectionParts.jsx";
 import { SectionCard, SettingsRow, ToggleSwitch } from "./Controls.jsx";
+import { isCommunityFeaturesEnabled } from "../../lib/community-features.js";
 
 export function AccountSection() {
   const settings = useAccountProfileSettings();
 
   if (!settings.enabled) return null;
   if (!settings.signedIn) return <SignedOutAccountSection />;
+  const communityFeaturesEnabled = isCommunityFeaturesEnabled();
 
   return (
     <SectionCard
@@ -20,12 +22,16 @@ export function AccountSection() {
     >
       <UserIdRow userId={settings.userId} />
       <CloudSyncRow settings={settings} />
-      <PublicProfileToggleRow
-        checked={settings.publicProfileOn}
-        disabled={settings.profileLoading || settings.profileSaving}
-        onChange={settings.handlePublicProfileToggle}
-      />
-      <PublicProfileDetails visible={settings.publicProfileOn} name={settings.name} github={settings.github} />
+      {communityFeaturesEnabled ? (
+        <>
+          <PublicProfileToggleRow
+            checked={settings.publicProfileOn}
+            disabled={settings.profileLoading || settings.profileSaving}
+            onChange={settings.handlePublicProfileToggle}
+          />
+          <PublicProfileDetails visible={settings.publicProfileOn} name={settings.name} github={settings.github} />
+        </>
+      ) : null}
     </SectionCard>
   );
 }

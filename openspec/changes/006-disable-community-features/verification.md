@@ -8,6 +8,11 @@
 - Started at: 2026-09-23
 - Completed at: 2026-09-23
 
+## Personal Instance Redeployment (2026-09-24)
+
+- 个人实例全量重部署后，`functions list --json` 显示包含社区相关函数在内的 23/23 个 `tokentracker-*` Functions 均为 `active`；远端 38 个迁移版本与仓库完全一致。
+- 部署没有修改 `TOKENTRACKER_ENABLE_COMMUNITY_FEATURES` 配置；本次未重复执行社区页面或真实账号验收。
+
 ## Post-merge Verification (2026-09-24, v1.0.4)
 
 - 合入 `origin/main` 的 v1.0.4 与 Hy4 preview 定价后，`npm run ci:local` 通过：Node 3036 通过、2 跳过，相关校验与 Dashboard 构建通过；Dashboard 802 项测试和类型检查通过。

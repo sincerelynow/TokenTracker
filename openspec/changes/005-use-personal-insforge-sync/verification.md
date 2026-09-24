@@ -8,6 +8,12 @@
 - Started at: 2026-09-22
 - Completed at: 2026-09-22
 
+## Personal Instance Redeployment (2026-09-24)
+
+- 使用 `EXPECTED_INSFORGE_APPKEY=8g8s7g8b bash scripts/deploy-personal-insforge.sh` 对已链接的个人实例执行完整重部署；目标项目校验通过，`db migrations up --all` 与 23 个 `tokentracker-*` Functions 部署均成功。
+- 部署后 `functions list --json` 显示 23/23 个函数为 `active`；`db migrations list --json` 显示远端 38 个迁移版本与仓库 `migrations/` 的 38 个版本完全一致，无缺失。
+- 本次核验覆盖部署和对象清单；未重复执行真实账号登录、上传或私有用量查询。原 VER-005/VER-007 的业务验收证据仍对应 2026-09-22。
+
 ## Post-merge Verification (2026-09-24, v1.0.4)
 
 - 将 `origin/main` 的 v1.0.4 与 Hy4 preview 定价合入本功能分支后，`npm run ci:local` 通过：Node 3036 通过、2 跳过；copy/locale/UI/架构/版本校验及 Dashboard 构建通过。

@@ -30,4 +30,4 @@ EXPECTED_INSFORGE_APPKEY="<your-project-appkey>" bash scripts/deploy-personal-in
 
 未设置完整 URL/key 时，云功能保持禁用，本地解析和本地统计仍可用。切换实例后应验证：首次同步收到历史、第二次同步不重复增加用量、Codex/DSH root 在私有统计中独立显示且公共统计只显示 provider family。
 
-当前个人实例已部署 37 条基础与增量迁移、RPC 和 23 个函数。test 账号验收已完成：四条 Codex/DSH root 首次写入、二次同步零新增、私有统计分别保留四个 root、公开社区按 `codex`/`dsh` 家族汇总。匿名访问私有表已验证遭拒绝。验收用 1010 个 token 的人工测试行仍保留在 test 账号中，便于核对。
+当前个人实例已部署 38 条基础与增量迁移、RPC 和 23 个函数。test 账号验收已完成：四条 Codex/DSH root 首次写入、二次同步零新增、私有统计分别保留四个 root、公开社区按 `codex`/`dsh` 家族汇总。匿名访问私有表已验证遭拒绝。验收用 1010 个 token 的人工测试行仍保留在 test 账号中，便于核对。

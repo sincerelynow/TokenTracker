@@ -34,8 +34,8 @@ vi.mock("./Controls.jsx", () => ({
 }));
 
 vi.mock("./AccountSectionParts.jsx", () => ({
-  PublicProfileFields: () => <div>Public profile fields</div>,
-  SignedOutAccountSection: () => <div>Signed out</div>,
+  PublicProfileFields: () => <div>{"Public profile fields"}</div>,
+  SignedOutAccountSection: () => <div>{"Signed out"}</div>,
 }));
 
 describe("AccountSection community settings", () => {

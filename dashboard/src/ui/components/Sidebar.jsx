@@ -334,8 +334,7 @@ function SidebarBody({
   // Re-compute copy() via getNavGroups when locale changes, otherwise the
   // labels stay stale after a language switch.
   const { resolvedLocale } = useLocale();
-  const communityFeaturesEnabled = isCommunityFeaturesEnabled();
-  const navGroups = useMemo(() => getNavGroups(communityFeaturesEnabled), [communityFeaturesEnabled, resolvedLocale]);
+  const navGroups = useMemo(() => getNavGroups(), [resolvedLocale]);
 
   return (
     <>

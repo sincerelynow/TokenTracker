@@ -9,10 +9,10 @@ import { isCommunityFeaturesEnabled } from "../../lib/community-features.js";
 
 export function AccountSection() {
   const settings = useAccountProfileSettings();
+  const communityFeaturesEnabled = isCommunityFeaturesEnabled();
 
   if (!settings.enabled) return null;
   if (!settings.signedIn) return <SignedOutAccountSection />;
-  const communityFeaturesEnabled = isCommunityFeaturesEnabled();
 
   return (
     <SectionCard

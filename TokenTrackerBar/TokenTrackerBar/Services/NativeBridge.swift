@@ -53,11 +53,6 @@ final class NativeBridge {
             .sink { [weak self] _ in self?.pushSettings() }
             .store(in: &cancellables)
 
-        NotificationCenter.default.publisher(for: .updateCheckerStatusDidChange)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.pushSettings() }
-            .store(in: &cancellables)
-
         // Mirror local limits preference changes (e.g. toggled in the
         // menu-bar popover) so the embedded dashboard reflects them without a
         // page reload.
@@ -235,7 +230,6 @@ final class NativeBridge {
             "animatedIcon": MenuBarIconStyle.current() != .static,
             "toastOnReset": WeeklyLimitResetDetector.toastEnabled(),
             "confettiOnReset": WeeklyLimitResetDetector.confettiEnabled(),
-            "autoUpdateEnabled": UpdateChecker.shared.autoUpdateEnabled,
             "launchAtLogin": launchAtLoginValue,
             "launchAtLoginSupported": launchAtLoginSupported,
             "dynamicIslandEnabled": UserDefaults.standard.bool(forKey: DynamicIslandController.enabledDefaultsKey),
@@ -244,8 +238,6 @@ final class NativeBridge {
             // the dashboard can gate the Labs toggle on its presence.
             "dynamicIslandSupported": true,
             "version": UpdateChecker.shared.currentVersion(),
-            "updateStatus": UpdateChecker.shared.statusText ?? NSNull(),
-            "updateBusy": UpdateChecker.shared.isBusy,
             "isSyncing": viewModel?.isSyncing ?? false,
             "locale": NativeLocalization.currentPreference,
             "currency": UserDefaults.standard.string(forKey: "MenuBarCurrency") ?? "USD",
@@ -311,11 +303,6 @@ final class NativeBridge {
         case "confettiOnReset":
             if let bool = value as? Bool {
                 UserDefaults.standard.set(bool, forKey: WeeklyLimitResetDetector.confettiEnabledKey)
-                NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
-            }
-        case "autoUpdateEnabled":
-            if let bool = value as? Bool {
-                UpdateChecker.shared.autoUpdateEnabled = bool
                 NotificationCenter.default.post(name: .nativeSettingsChanged, object: nil)
             }
         case "launchAtLogin":
@@ -452,12 +439,6 @@ final class NativeBridge {
         case "syncNow":
             if let viewModel {
                 Task { await viewModel.triggerSync() }
-            }
-        case "checkForUpdates":
-            UpdateChecker.shared.check(silent: false)
-            // UpdateChecker mutates statusText synchronously; push a follow-up snapshot
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                self?.pushSettings()
             }
         case "openAbout":
             if let url = URL(string: "https://github.com/xiufengsun/TokenTracker") {

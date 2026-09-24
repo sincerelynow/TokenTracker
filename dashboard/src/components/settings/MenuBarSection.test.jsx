@@ -3,9 +3,11 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MenuBarSection } from "./MenuBarSection.jsx";
+import { MenuBarSection, NativeAppFooter } from "./MenuBarSection.jsx";
 
 const nativeSettingsMock = vi.hoisted(() => ({
+  available: true,
+  isWindows: false,
   settings: {
     toastOnReset: true,
     confettiOnReset: true,
@@ -19,11 +21,15 @@ const nativeSettingsMock = vi.hoisted(() => ({
 
 vi.mock("../../hooks/use-native-settings.js", () => ({
   useNativeSettings: () => ({
-    available: true,
+    available: nativeSettingsMock.available,
     settings: nativeSettingsMock.settings,
     setSetting: nativeSettingsMock.setSetting,
     runAction: nativeSettingsMock.runAction,
   }),
+}));
+
+vi.mock("../../lib/native-bridge.js", () => ({
+  isNativeWindowsApp: () => nativeSettingsMock.isWindows,
 }));
 
 vi.mock("../../lib/copy", () => ({
@@ -32,6 +38,8 @@ vi.mock("../../lib/copy", () => ({
 
 describe("MenuBarSection limit-reset feedback", () => {
   beforeEach(() => {
+    nativeSettingsMock.available = true;
+    nativeSettingsMock.isWindows = false;
     nativeSettingsMock.setSetting.mockReset();
   });
 
@@ -62,7 +70,19 @@ describe("MenuBarSection limit-reset feedback", () => {
     expect(nativeSettingsMock.setSetting).toHaveBeenCalledWith("confettiOnReset", false);
   });
 
-  it("toggles automatic updates independently of manual checks", async () => {
+  it("hides update controls in the macOS app", () => {
+    render(
+      <MemoryRouter>
+        <MenuBarSection />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("switch", { name: "settings.menubar.autoUpdate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "settings.menubar.checkUpdates" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Windows update controls", async () => {
+    nativeSettingsMock.isWindows = true;
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -80,9 +100,19 @@ describe("MenuBarSection limit-reset feedback", () => {
     });
 
     expect(nativeSettingsMock.setSetting).toHaveBeenCalledWith("autoUpdateEnabled", false);
-    // Manual check stays available: the button is untouched by the toggle.
     expect(
       screen.getByRole("button", { name: /settings\.menubar\.checkUpdates/ }),
     ).toBeEnabled();
+  });
+
+  it("omits the upstream update link from the dashboard footer", () => {
+    nativeSettingsMock.available = false;
+    render(
+      <MemoryRouter>
+        <NativeAppFooter />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "settings.menubar.checkUpdates" })).not.toBeInTheDocument();
   });
 });

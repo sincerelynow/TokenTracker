@@ -13,7 +13,7 @@ final class StatusBarController: NSObject {
 
     private static weak var instance: StatusBarController?
 
-    /// 在显示 `NSAlert` / sheet 前调用：收起菜单栏 Popover，否则其 `NSPanel` 常会盖住更新提示。
+    /// 在显示 `NSAlert` / sheet 前调用：收起菜单栏 Popover，避免其 `NSPanel` 盖住弹窗。
     static func prepareForSystemAlert() {
         instance?.closePopoverForModalAlert()
     }
@@ -48,10 +48,6 @@ final class StatusBarController: NSObject {
     )
     private let confettiController = ScreenConfettiOverlayController()
     private var cancellables = Set<AnyCancellable>()
-    /// While the status-item menu is open, refreshes the “Check for Updates” row when download/check status changes.
-    private var updateMenuStatusObserver: NSObjectProtocol?
-    private weak var trackedStatusMenu: NSMenu?
-    private static let updateMenuItemTag = 4_242
 
     private let menuBarHeight: CGFloat = 22
     private let menuBarIconSize = NSSize(width: 22, height: 22)
@@ -1081,7 +1077,6 @@ final class StatusBarController: NSObject {
 
     private func showMenu() {
         let menu = buildMenu()
-        trackedStatusMenu = menu
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
@@ -1244,13 +1239,6 @@ final class StatusBarController: NSObject {
         menu.addItem(.separator())
 
         // ── Group 4: System & App Info ──
-        let updateTitle = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
-        let updateItem = NSMenuItem(title: updateTitle, action: #selector(checkForUpdates), keyEquivalent: "u")
-        updateItem.tag = Self.updateMenuItemTag
-        updateItem.target = self
-        updateItem.isEnabled = !UpdateChecker.shared.isBusy
-        menu.addItem(updateItem)
-
         let version = UpdateChecker.shared.currentVersion()
         let aboutItem = NSMenuItem(title: "TokenTracker v\(version)", action: #selector(openAbout), keyEquivalent: "")
         aboutItem.target = self
@@ -1259,8 +1247,6 @@ final class StatusBarController: NSObject {
         let starItem = NSMenuItem(title: Strings.menuStarOnGitHub, action: #selector(openGitHub), keyEquivalent: "")
         starItem.target = self
         menu.addItem(starItem)
-
-        menu.delegate = self
 
         menu.addItem(.separator())
 
@@ -1333,10 +1319,6 @@ final class StatusBarController: NSObject {
 
     @objc private func openDashboardSettings() {
         DashboardWindowController.shared.showSettings()
-    }
-
-    @objc private func checkForUpdates() {
-        UpdateChecker.shared.check(silent: false)
     }
 
     @objc private func openGitHub() {
@@ -1440,45 +1422,5 @@ final class StatusBarController: NSObject {
 
         let formatted = TokenFormatter.formatCompact(tokens)
         return "\(Strings.todayTitle): \(formatted) \(Strings.tokensUnit) · \(cost)"
-    }
-
-    private func applyUpdateMenuItemState(in menu: NSMenu) {
-        guard let item = menu.item(withTag: Self.updateMenuItemTag) else { return }
-        let title = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
-        if item.title != title {
-            item.title = title
-        }
-        let enabled = !UpdateChecker.shared.isBusy
-        if item.isEnabled != enabled {
-            item.isEnabled = enabled
-        }
-    }
-}
-
-// MARK: - NSMenuDelegate (live update row while menu is open)
-
-@MainActor
-extension StatusBarController: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
-        trackedStatusMenu = menu
-        updateMenuStatusObserver = NotificationCenter.default.addObserver(
-            forName: .updateCheckerStatusDidChange,
-            object: UpdateChecker.shared,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let menu = self.trackedStatusMenu else { return }
-                self.applyUpdateMenuItemState(in: menu)
-            }
-        }
-        applyUpdateMenuItemState(in: menu)
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        trackedStatusMenu = nil
-        if let observer = updateMenuStatusObserver {
-            NotificationCenter.default.removeObserver(observer)
-            updateMenuStatusObserver = nil
-        }
     }
 }

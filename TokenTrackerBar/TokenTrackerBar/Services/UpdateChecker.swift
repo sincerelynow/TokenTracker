@@ -42,6 +42,8 @@ final class UpdateChecker {
     }
 
     func check(silent: Bool = false) {
+        // Personal builds have no release feed. Never install an upstream DMG.
+        guard Self.updateChecksEnabled else { return }
         guard !isBusy else { return }
 
         // Auto-update toggle: silent checks are exclusively launch-time background
@@ -82,6 +84,8 @@ final class UpdateChecker {
             }
         }
     }
+
+    private static let updateChecksEnabled = false
 
     // MARK: - GitHub API (URLSession — respects system proxy)
 

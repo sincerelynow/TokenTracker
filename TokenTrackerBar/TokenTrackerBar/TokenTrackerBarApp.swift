@@ -15,14 +15,11 @@ struct TokenTrackerBarApp: App {
                 // SwiftUI re-syncs the menu, e.g. on activation policy flips.)
                 // Replace the system About item (which gets a default icon on
                 // macOS 26) with a plain button, so it matches the iconless
-                // custom items below; "Check for Updates…" sits right after it.
+                // custom items below.
                 CommandGroup(replacing: .appInfo) {
                     Button(Strings.menuAbout) {
                         NSApp.activate(ignoringOtherApps: true)
                         NSApp.orderFrontStandardAboutPanel(nil)
-                    }
-                    Button(Strings.menuCheckForUpdates) {
-                        UpdateChecker.shared.check(silent: false)
                     }
                 }
                 CommandGroup(replacing: .appSettings) {
@@ -82,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var userInitiatedQuit = false
     private static let wakeCatchUpDebounceInterval: TimeInterval = 60
 
-    /// Real quit path: popover/Footer Quit buttons, NativeBridge "quit", UpdateChecker relaunch.
+    /// Real quit path: popover/Footer Quit buttons and NativeBridge "quit".
     /// Cmd+Q from the dashboard window goes through `applicationShouldTerminate` and is downgraded
     /// to a window-close so the menu bar item stays alive.
     static func requestQuit() {
@@ -162,8 +159,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await viewModel.syncThenLoad()
             }
             viewModel.startAutoRefresh()
-
-            UpdateChecker.shared.check(silent: true)
         }
     }
 

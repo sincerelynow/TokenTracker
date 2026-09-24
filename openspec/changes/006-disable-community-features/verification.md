@@ -8,6 +8,11 @@
 - Started at: 2026-09-23
 - Completed at: 2026-09-23
 
+## Post-merge Verification (2026-09-24)
+
+- 合入 `origin/main` 后，`npm run ci:local` 通过：Node 3030 通过、2 跳过，相关校验与 Dashboard 构建通过；`npm --prefix dashboard run test -- --run` 通过 802 项测试，`npm --prefix dashboard run typecheck` 通过。
+- 合并差异未修改社区开关、UI 路由、预加载、云同步刷新或三个排行榜 workflow；默认关闭与显式开启行为继续由现有测试覆盖。
+
 ## Checks
 
 | ID | Required | Requirement/Scenario | Command or method | Result | Evidence/Notes | Owner |

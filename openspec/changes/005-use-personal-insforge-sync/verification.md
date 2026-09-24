@@ -8,6 +8,12 @@
 - Started at: 2026-09-22
 - Completed at: 2026-09-22
 
+## Post-merge Verification (2026-09-24, v1.0.4)
+
+- 将 `origin/main` 的 v1.0.4 与 Hy4 preview 定价合入本功能分支后，`npm run ci:local` 通过：Node 3036 通过、2 跳过；copy/locale/UI/架构/版本校验及 Dashboard 构建通过。
+- `npm --prefix dashboard run test -- --run` 通过：114 个文件、802 项测试；`npm --prefix dashboard run typecheck` 通过。合并差异未修改个人实例配置、上传进度或 OpenSpec 行为文件。
+- 本次未重新部署个人实例或重复真实账号验收；VER-005/VER-007 的远端证据仍对应 2026-09-22 已部署版本。
+
 ## Post-merge Verification (2026-09-24)
 
 - 将 `origin/main` 的 1.0.3、依赖锁定和 GPT-6 Sol 定价合入本功能分支后，`npm run ci:local` 通过：Node 3030 通过、2 跳过；copy/locale/UI/架构/版本校验及 Dashboard 构建通过。

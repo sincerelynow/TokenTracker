@@ -260,6 +260,9 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   //    converted at ~7.2 RMB/USD. DeepSeek-style cache: cache_write = input. ──
   "hy3-preview-agent": { input: 0.167, output: 0.556, cache_read: 0.056, cache_write: 0.167 },
   "hy3-preview": { input: 0.167, output: 0.556, cache_read: 0.056, cache_write: 0.167 },
+  // Hy4 preview: 6 / 0.3 (cache hit) / 18 RMB per MTok at ~7.2 RMB/USD (#633).
+  "hy4-preview": { input: 0.833, output: 2.5, cache_read: 0.042, cache_write: 0.833 },
+  "hy4-preview-agent": { input: 0.833, output: 2.5, cache_read: 0.042, cache_write: 0.833 },
   // ── Misc / Free ──
   "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
   "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
@@ -468,6 +471,7 @@ function getModelPricing(model: string, source = "") {
   if (lower.includes("glm-5")) return MODEL_PRICING["glm-5"];
   if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
   if (lower.includes("hy3")) return MODEL_PRICING["hy3-preview-agent"];
+  if (lower.includes("hy4")) return MODEL_PRICING["hy4-preview"];
   if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
   if (lower.includes("fugu")) return MODEL_PRICING["sakana/fugu-ultra"];
   if (lower.includes("longcat")) return MODEL_PRICING["longcat-2.0"];

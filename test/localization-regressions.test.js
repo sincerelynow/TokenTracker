@@ -190,12 +190,12 @@ test("Codex Spark usage limit row labels stay on one line", () => {
   assert.match(usageLimitsPanel, /data-limit-label[\s\S]*?\bwhitespace-nowrap\b[\s\S]*?var\(--tt-limits-label-w\)/);
 });
 
-test("locale PR stays scoped away from silent auto update flags", () => {
+test("macOS app no longer schedules a silent upstream update check", () => {
   const app = read("TokenTrackerBar/TokenTrackerBar/TokenTrackerBarApp.swift");
   const plist = read("TokenTrackerBar/TokenTrackerBar/Info.plist");
   const project = read("TokenTrackerBar/project.yml");
 
-  assert.ok(app.includes("UpdateChecker.shared.check(silent: true)"));
+  assert.doesNotMatch(app, /UpdateChecker\.shared\.check\(silent:\s*true\)/);
   assert.doesNotMatch(app, /TokenTrackerEnableSilentAutoUpdate|isSilentAutoUpdateEnabled/);
   assert.doesNotMatch(plist, /TokenTrackerEnableSilentAutoUpdate/);
   assert.doesNotMatch(project, /TokenTrackerEnableSilentAutoUpdate/);

@@ -1,6 +1,9 @@
+import React from "react";
 import { Link } from "react-router-dom";
-import { Activity, ArrowUpRight, Download, RefreshCw } from "lucide-react";
+import { Activity, ArrowUpRight, RefreshCw } from "lucide-react";
 import { useNativeSettings } from "../../hooks/use-native-settings.js";
+import { ConfirmModal } from "../../ui/components";
+import { showToast } from "../../ui/components/Toast.jsx";
 import { STATUSPAGE_URL } from "../../lib/config";
 import { copy } from "../../lib/copy";
 import { cn } from "../../lib/cn";
@@ -19,9 +22,6 @@ export function MenuBarSection() {
   const toastOnReset = settings?.toastOnReset !== false;
   const confettiOnReset = settings?.confettiOnReset !== false;
   const launchAtLoginSupported = settings?.launchAtLoginSupported !== false;
-  const autoUpdateEnabled = settings?.autoUpdateEnabled !== false;
-  const updateStatus = settings?.updateStatus || null;
-  const updateBusy = Boolean(settings?.updateBusy);
   const isSyncing = Boolean(settings?.isSyncing);
 
   return (
@@ -93,85 +93,126 @@ export function MenuBarSection() {
           </button>
         }
       />
-      {isWindows ? (
-        <>
-          <SettingsRow
-            label={copy("settings.menubar.autoUpdate")}
-            hint={copy("settings.menubar.autoUpdateHint")}
-            control={
-              <ToggleSwitch
-                checked={autoUpdateEnabled}
-                onChange={() => setSetting("autoUpdateEnabled", !autoUpdateEnabled)}
-                ariaLabel={copy("settings.menubar.autoUpdate")}
-              />
-            }
-          />
-          <SettingsRow
-            label={copy("settings.menubar.updates")}
-            hint={updateStatus || undefined}
-            control={
-              <button
-                type="button"
-                onClick={() => runAction("checkForUpdates")}
-                disabled={updateBusy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-oai-gray-200 px-3 text-xs font-medium text-oai-gray-700 transition-colors hover:bg-oai-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-oai-gray-800 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800"
-              >
-                <Download className="h-3.5 w-3.5" aria-hidden />
-                {copy("settings.menubar.checkUpdates")}
-              </button>
-            }
-          />
-        </>
-      ) : null}
     </SectionCard>
   );
 }
 
+function hasUpdate(current, latest) {
+  function parseParts(version) {
+    return version.replace(/^v/, "").split(".").map(Number);
+  }
+
+  const currentParts = parseParts(current);
+  const latestParts = parseParts(latest);
+  for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i += 1) {
+    const currentPart = currentParts[i] || 0;
+    const latestPart = latestParts[i] || 0;
+    if (latestPart > currentPart) return true;
+    if (latestPart < currentPart) return false;
+  }
+  return false;
+}
+
 export function NativeAppFooter() {
-  const { available, settings, runAction } = useNativeSettings();
-  const showNativeInfo = available && settings?.version;
+  const { available, settings } = useNativeSettings();
   const nativePlatform = settings?.platform || "macos";
+  const [checking, setChecking] = React.useState(false);
+  const [updateModal, setUpdateModal] = React.useState({
+    open: false,
+    latestVersion: "",
+    htmlUrl: "",
+  });
   const currentVersion = import.meta.env.VITE_APP_VERSION || "0.64.2";
+
+  const handleCheckUpdates = async () => {
+    setChecking(true);
+    try {
+      const res = await fetch("https://api.github.com/repos/xiufengsun/TokenTracker/releases/latest");
+      if (!res.ok) throw new Error("Failed to fetch");
+      const data = await res.json();
+      const latestVersion = data.tag_name;
+
+      if (hasUpdate(currentVersion, latestVersion)) {
+        setUpdateModal({
+          open: true,
+          latestVersion,
+          htmlUrl: data.html_url,
+        });
+      } else {
+        showToast({
+          title: copy("settings.menubar.updates.upToDate"),
+        });
+      }
+    } catch (error) {
+      console.error("Check updates failed:", error);
+      showToast({
+        title: copy("settings.menubar.updates.failed"),
+      });
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const modalTitle = copy("settings.menubar.updates.modalTitle");
+  const modalDescription = copy("settings.menubar.updates.modalDescription", {
+    version: updateModal.latestVersion,
+  });
+  const modalConfirm = copy("settings.menubar.updates.modalConfirm");
+  const modalCancel = copy("settings.menubar.updates.modalCancel");
+  const nativeVersion = settings?.version
+    ? nativePlatform === "windows"
+      ? copy("settings.menubar.updates.footerCore", { version: settings.version })
+      : copy("settings.menubar.updates.footerCombined", {
+          barVersion: settings.version,
+          coreVersion: currentVersion,
+        })
+    : copy("settings.menubar.updates.footerCore", { version: currentVersion });
 
   return (
     <div className="mt-6 flex flex-col items-center justify-center gap-4 text-xs text-oai-gray-500 dark:text-oai-gray-500">
       <div className="flex flex-wrap items-center justify-center gap-2">
-        {showNativeInfo ? (
-          <>
-            <span>
-              {nativePlatform === "windows"
-                ? copy("settings.menubar.updates.footerCore", { version: settings.version })
-                : copy("settings.menubar.updates.footerCombined", {
-                    barVersion: settings.version,
-                    coreVersion: currentVersion,
-                  })}
-            </span>
-            <span aria-hidden>·</span>
-            <button
-              type="button"
-              onClick={() => runAction("openAbout")}
-              className="underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
-            >
-              GitHub
-            </button>
-            <span aria-hidden>·</span>
-          </>
+        {available ? (
+          <span>{nativeVersion}</span>
         ) : (
           <>
             <span>{copy("settings.menubar.updates.footerCore", { version: currentVersion })}</span>
             <span aria-hidden>·</span>
+            <button
+              type="button"
+              onClick={handleCheckUpdates}
+              disabled={checking}
+              className="underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300 disabled:opacity-50"
+            >
+              {checking ? copy("settings.menubar.updates.checking") : copy("settings.menubar.checkUpdates")}
+            </button>
+            <span aria-hidden>·</span>
+            <a
+              href={STATUSPAGE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
+            >
+              <Activity className="h-3.5 w-3.5" aria-hidden />
+              {copy("settings.footer.statusPage")}
+            </a>
           </>
         )}
-        <a
-          href={STATUSPAGE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 underline-offset-2 transition-colors hover:text-oai-gray-700 hover:underline dark:hover:text-oai-gray-300"
-        >
-          <Activity className="h-3.5 w-3.5" aria-hidden />
-          {copy("settings.footer.statusPage")}
-        </a>
       </div>
+
+      {!available ? (
+        <ConfirmModal
+          open={updateModal.open}
+          title={modalTitle}
+          description={modalDescription}
+          confirmLabel={modalConfirm}
+          cancelLabel={modalCancel}
+          onConfirm={() => {
+            window.open(updateModal.htmlUrl, "_blank");
+            setUpdateModal((previous) => ({ ...previous, open: false }));
+          }}
+          onCancel={() => setUpdateModal((previous) => ({ ...previous, open: false }))}
+        />
+      ) : null}
     </div>
   );
 }

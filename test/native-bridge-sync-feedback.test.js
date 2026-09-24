@@ -27,24 +27,17 @@ test("NativeBridge pushes settings when sync state changes", () => {
   );
 });
 
-test("NativeBridge pushes settings when update checker status changes", () => {
+test("NativeBridge omits disabled updater state and legacy update actions", () => {
   const source = fs.readFileSync(nativeBridgePath, "utf8");
 
-  assert.match(
+  assert.doesNotMatch(source, /"autoUpdateEnabled"/, "macOS must not expose the upstream auto-update toggle");
+  assert.doesNotMatch(source, /"updateStatus"|"updateBusy"/, "disabled updater state must not reach the dashboard");
+  assert.doesNotMatch(
     source,
-    /"updateStatus":\s*UpdateChecker\.shared\.statusText\s*\?\?\s*NSNull\(\)/,
-    "settings payload should expose the current update checker status text",
+    /NotificationCenter\.default\.publisher\(for:\s*\.updateCheckerStatusDidChange\)/,
+    "NativeBridge must not subscribe to disabled updater status changes",
   );
-  assert.match(
-    source,
-    /"updateBusy":\s*UpdateChecker\.shared\.isBusy/,
-    "settings payload should expose whether the update checker is busy",
-  );
-  assert.match(
-    source,
-    /NotificationCenter\.default\.publisher\(for:\s*\.updateCheckerStatusDidChange\)[\s\S]*?\.sink\s*\{\s*\[weak self\]\s*_\s*in\s*self\?\.pushSettings\(\)\s*\}/,
-    "update checker status changes should be pushed to the dashboard settings UI",
-  );
+  assert.doesNotMatch(source, /case\s+"checkForUpdates"|UpdateChecker\.shared\.check\(/, "legacy update actions must be inert");
 });
 
 test("NativeBridge settings fingerprint tracks available menu items", () => {

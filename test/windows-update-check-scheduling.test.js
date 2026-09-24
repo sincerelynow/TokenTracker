@@ -5,48 +5,68 @@ const { test } = require("node:test");
 
 const repoRoot = path.join(__dirname, "..");
 
-function readTrayContext() {
+function readWindowsSource(file) {
   return fs
-    .readFileSync(path.join(repoRoot, "TokenTrackerWin/TrayApplicationContext.cs"), "utf8")
+    .readFileSync(path.join(repoRoot, "TokenTrackerWin", file), "utf8")
     .replace(/\r\n/g, "\n");
 }
 
-test("Windows tray schedules periodic silent update checks while resident", () => {
-  const source = readTrayContext();
+test("Windows updater rejects all checks before any upstream request", () => {
+  const source = readWindowsSource("UpdateChecker.cs");
 
-  // A long-lived tray process must re-check for updates, not only once at launch.
   assert.match(
     source,
-    /private const int UpdateCheckIntervalMinutes = \d+ \* 60;/,
-    "update check interval must be defined in hours worth of minutes",
+    /private const bool UpstreamUpdatesEnabled = false;/,
+    "personal Windows builds must keep the upstream update channel disabled",
   );
   assert.match(
     source,
-    /private readonly System\.Windows\.Forms\.Timer _updateCheckTimer = new\(\)\n\s*\{\n\s*Interval = UpdateCheckIntervalMinutes \* 60 \* 1000,\n\s*\};/,
-    "a dedicated timer must drive periodic update checks",
+    /public async Task<CheckOutcome> CheckAsync\(bool silent\)\n\s*\{\n\s*if \(!UpstreamUpdatesEnabled\)[\s\S]*?return CheckOutcome\.Skipped;[\s\S]*?FetchLatestReleaseAsync\(\)/,
+    "CheckAsync must return before reaching the release API",
   );
   assert.match(
     source,
-    /_updateCheckTimer\.Tick \+= \(_, _\) => _ = _updateChecker\.CheckAsync\(silent: true\);\n\s*_updateCheckTimer\.Start\(\);/,
-    "timer ticks must run the same silent check as launch",
-  );
-  // The launch check stays in place.
-  assert.match(
-    source,
-    /_ = _updateChecker\.CheckAsync\(silent: true\);\n\s*_updateCheckTimer\.Tick/,
-    "the launch-time check must be kept alongside the periodic one",
+    /public async Task<bool> DownloadAndInstallAsync\(\)\n\s*\{\n\s*if \(!UpstreamUpdatesEnabled\)[\s\S]*?return false;[\s\S]*?DownloadSetupAsync\(/,
+    "the legacy installer path must also be disabled",
   );
 });
 
-test("periodic update check timer is disposed with the tray context", () => {
-  const source = readTrayContext();
-  const disposeStart = source.indexOf("protected override void Dispose(bool disposing)");
-  assert.notEqual(disposeStart, -1, "Dispose override must exist");
-  const dispose = source.slice(disposeStart);
+test("Windows tray has no launch or periodic update scheduling", () => {
+  const source = readWindowsSource("TrayApplicationContext.cs");
+
+  assert.doesNotMatch(
+    source,
+    /UpdateCheckIntervalMinutes|_updateCheckTimer|CheckAsync\(/,
+    "the resident tray must not schedule or launch update checks",
+  );
+  assert.doesNotMatch(
+    source,
+    /_checkUpdatesItem|OnCheckUpdatesClicked|RunManualCheckAsync|DownloadAndInstallAsync\(/,
+    "the tray must not expose an update action or installer hand-off",
+  );
+});
+
+test("legacy Dashboard update actions are ignored while sync and version remain wired", () => {
+  const source = readWindowsSource("TrayApplicationContext.cs");
 
   assert.match(
-    dispose,
-    /_updateCheckTimer\.Dispose\(\);/,
-    "the update check timer must be disposed to avoid leaks after quit",
+    source,
+    /case "syncNow":\n\s*_server\.TriggerSync\(\);/,
+    "sync actions must remain available",
+  );
+  assert.match(
+    source,
+    /case "checkForUpdates":\n\s*\/\/ Ignore actions from older embedded Dashboard bundles\.\n\s*break;/,
+    "old Dashboard update actions must be safely ignored",
+  );
+  assert.match(
+    source,
+    /version = _updateChecker\.CurrentVersion,/,
+    "the local app version must remain available to the Dashboard",
+  );
+  assert.doesNotMatch(
+    source,
+    /autoUpdateEnabled|updateStatus|updateBusy/,
+    "disabled update controls and state must not be pushed to the Dashboard",
   );
 });

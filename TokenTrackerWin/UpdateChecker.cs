@@ -9,12 +9,16 @@ namespace TokenTrackerWin;
 /// <summary>
 /// Windows counterpart of <c>TokenTrackerBar/Services/UpdateChecker.swift</c>.
 ///
-/// Checks the GitHub "latest release" for a newer version, downloads the
+/// This is the historical Windows updater implementation. Personal builds have no
+/// upstream release channel, so the public check and install entry points return
+/// before any network or installer work. The release implementation remains below
+/// for a future personal channel.
+///
+/// When enabled, it checks the GitHub "latest release", downloads the
 /// <c>TokenTracker-Setup.exe</c> asset, and runs it fully silently. Because a
 /// silent Inno install does not relaunch the app (its <c>[Run]</c> postinstall is
-/// <c>skipifsilent</c>), we drive the close → install → relaunch sequence
-/// ourselves: a small detached <c>cmd</c> runs the installer and then restarts
-/// this exe once the upgrade finishes (see <see cref="DownloadAndInstallAsync"/>).
+/// <c>skipifsilent</c>), the close → install → relaunch sequence is driven by a
+/// detached <c>cmd</c> (see <see cref="DownloadAndInstallAsync"/>).
 ///
 /// This type does NO UI — it only manages state and raises <see cref="Changed"/>;
 /// the tray context owns every dialog/balloon (mirrors how <see cref="UsagePoller"/>
@@ -27,6 +31,11 @@ internal sealed class UpdateChecker
 {
     public enum UpdateState { Idle, Checking, UpdateAvailable, Downloading, Installing }
     public enum CheckOutcome { UpToDate, UpdateAvailable, Failed, Skipped }
+
+    // Personal builds do not have an upstream release channel. Keep the historical
+    // checker implementation below so a future personal channel can restore it, but
+    // make every public update path a no-op until that channel exists.
+    private const bool UpstreamUpdatesEnabled = false;
 
     private const string Repo = "xiufengsun/TokenTracker";
 
@@ -74,14 +83,19 @@ internal sealed class UpdateChecker
     // ── Public API ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Check GitHub for a newer release. <paramref name="silent"/> launch checks are
-    /// skipped for dev builds (no embedded server next to the exe) so a developer run
-    /// is never nudged to "update" to an official release. Installed builds perform
-    /// the download/install hand-off automatically when the preference is enabled;
-    /// manual checks remain available regardless of the preference.
+    /// Check for a newer release. Personal builds have no upstream release channel,
+    /// so this method returns before touching the network for both silent and legacy
+    /// manual callers. The historical release-check implementation remains below for
+    /// a future personal update channel.
     /// </summary>
     public async Task<CheckOutcome> CheckAsync(bool silent)
     {
+        if (!UpstreamUpdatesEnabled)
+        {
+            Diag.Log("update", "upstream update checks disabled");
+            return CheckOutcome.Skipped;
+        }
+
         if (State is UpdateState.Checking or UpdateState.Downloading or UpdateState.Installing)
             return CheckOutcome.Skipped;
         if (silent && !AutoUpdatePolicy.IsEnabled())
@@ -136,7 +150,10 @@ internal sealed class UpdateChecker
         }
     }
 
-    /// <summary>Whether launch-time checks may download and install releases.</summary>
+    /// <summary>
+    /// Historical launch-time preference. It does not re-enable updates for personal
+    /// builds; <see cref="UpstreamUpdatesEnabled"/> remains the network gate.
+    /// </summary>
     public bool AutoUpdateEnabled
     {
         get => AutoUpdatePolicy.IsEnabled();
@@ -145,12 +162,20 @@ internal sealed class UpdateChecker
 
     /// <summary>
     /// Download the prepared setup asset and launch it silently, then ask the tray to
-    /// quit so the installer can overwrite the running files and relaunch us. Must be
-    /// called only after a check left <see cref="State"/> == <see cref="UpdateState.UpdateAvailable"/>.
-    /// Returns false (and surfaces nothing) if there is no pending asset or the download fails.
+    /// quit so the installer can overwrite the running files and relaunch us when the
+    /// historical updater is enabled. Personal builds return false before any work.
+    /// Must be called only after a check left <see cref="State"/> ==
+    /// <see cref="UpdateState.UpdateAvailable"/>. Returns false (and surfaces nothing)
+    /// if there is no pending asset or the download fails.
     /// </summary>
     public async Task<bool> DownloadAndInstallAsync()
     {
+        if (!UpstreamUpdatesEnabled)
+        {
+            Diag.Log("update", "upstream update installation disabled");
+            return false;
+        }
+
         if (State != UpdateState.UpdateAvailable || _setupUrl is null) return false;
 
         SetState(UpdateState.Downloading);

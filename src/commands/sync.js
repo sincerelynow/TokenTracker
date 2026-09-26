@@ -5,7 +5,7 @@ const fssync = require("node:fs");
 const cp = require("node:child_process");
 const readline = require("node:readline");
 
-const { resolveInstallPaths, resolveZcodeNativeDbPath, ensureFlatCursor } = require("../lib/install-resolver");
+const { resolveInstallPaths, resolveZcodeNativeDbPath, resolveMimoNativeDbPath, ensureFlatCursor } = require("../lib/install-resolver");
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
 const wsl = require("../lib/wsl-probe");
 const { resolveCodexRootsSync } = require("../lib/codex-roots");
@@ -118,6 +118,8 @@ const {
   parseKilocodeIncremental,
   resolveRoocodeTaskFiles,
   parseRoocodeIncremental,
+  resolveClineSessionFilesWithStatus,
+  parseClineIncremental,
   resolveZedDbPath,
   parseZedIncremental,
   resolveLmstudioLogFiles,
@@ -299,6 +301,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "anythingllm",
   "claude",
   "claude-science",
+  "cline",
   "codebuddy",
   "codex",
   "copilot",
@@ -642,7 +645,6 @@ async function cmdSync(argv, context = {}) {
     const claudeProjectsDirs = claudeInstallHomes.map((h) => path.join(h, "projects"));
     const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
     const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
-    const mimoHome = process.env.MIMO_HOME || path.join(xdgDataHome, "mimocode");
 
     // OpenClaw session plugin integration: lifecycle hooks request an
     // OpenClaw-only auto sync so unrelated providers do not get walked.
@@ -1556,9 +1558,7 @@ async function cmdSync(argv, context = {}) {
     // double-counting usage already counted as source=claude.
     let mimoResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (sourceAllowed("mimo")) {
-      const mimoNativeValue = process.platform === "win32" && typeof process.env.APPDATA === "string"
-        ? path.join(process.env.APPDATA.trim(), "mimocode", "mimocode.db")
-        : path.join(mimoHome, "mimocode.db");
+      const mimoNativeValue = resolveMimoNativeDbPath({ home });
       const wslMimoDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
         ? wsl.discoverWslHome(".local/share/mimocode")
         : null;
@@ -1903,6 +1903,40 @@ async function cmdSync(argv, context = {}) {
         });
       } catch (err) {
         warnProviderParseFailure("Roo Code", err, opts);
+      }
+    }
+
+    // ── Cline (CLI v3 / desktop app — ~/.cline/data/sessions) ──
+    let clineResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("cline")) {
+      try {
+        const clineScan = resolveClineSessionFilesWithStatus(process.env);
+        const clineSessionFiles = clineScan.files;
+        for (const failure of clineScan.errors) {
+          warnProviderParseFailure("Cline", failure.error, opts);
+        }
+        if (progress?.enabled && clineSessionFiles.length > 0) {
+          progress.start(
+            `Parsing Cline ${renderBar(0)} 0/${formatNumber(clineSessionFiles.length)} transcripts | buckets 0`,
+          );
+        }
+        clineResult = await parseClineIncremental({
+          sessionFiles: clineSessionFiles,
+          scanCompleteRoots: clineScan.completedRoots,
+          cursors,
+          queuePath,
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing Cline ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(
+                p.total,
+              )} transcripts | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+        });
+      } catch (err) {
+        warnProviderParseFailure("Cline", err, opts);
       }
     }
 
@@ -3074,6 +3108,7 @@ async function cmdSync(argv, context = {}) {
       zcodeResult.recordsProcessed +
       kilocodeResult.recordsProcessed +
       roocodeResult.recordsProcessed +
+      clineResult.recordsProcessed +
       zedResult.recordsProcessed +
       gooseResult.recordsProcessed +
       dshResult.recordsProcessed +
@@ -3115,6 +3150,7 @@ async function cmdSync(argv, context = {}) {
       zcodeResult.bucketsQueued +
       kilocodeResult.bucketsQueued +
       roocodeResult.bucketsQueued +
+      clineResult.bucketsQueued +
       zedResult.bucketsQueued +
       gooseResult.bucketsQueued +
       dshResult.bucketsQueued +

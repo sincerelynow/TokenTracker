@@ -104,11 +104,11 @@ function hasUpdate(current, latest) {
 
   const currentParts = parseParts(current);
   const latestParts = parseParts(latest);
-  for (let i = 0; i < Math.max(currentParts.length, latestParts.length); i += 1) {
+  for (let i = 0; i !== Math.max(currentParts.length, latestParts.length); i += 1) {
     const currentPart = currentParts[i] || 0;
     const latestPart = latestParts[i] || 0;
     if (latestPart > currentPart) return true;
-    if (latestPart < currentPart) return false;
+    if (currentPart > latestPart) return false;
   }
   return false;
 }

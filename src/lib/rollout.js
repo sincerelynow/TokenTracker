@@ -15427,6 +15427,21 @@ function pickUsageInt(usage, fields) {
   return 0;
 }
 
+// Prefer the message-level timestamp (ms epoch), then the entry-level ISO
+// string. Both must be real dates: a message stamped with a small placeholder
+// number was accepted by the old `> 0` check and landed in the 1970-01-01
+// bucket (seen in the cloud from three omp users).
+const MIN_OMP_TIMESTAMP_MS = Date.UTC(2020, 0, 1);
+function ompEntryTimestampMs(msg, entry) {
+  const direct = Number(msg.timestamp);
+  if (Number.isFinite(direct) && direct >= MIN_OMP_TIMESTAMP_MS) return direct;
+  if (typeof entry.timestamp === "string" && entry.timestamp) {
+    const parsed = Date.parse(entry.timestamp);
+    if (Number.isFinite(parsed) && parsed >= MIN_OMP_TIMESTAMP_MS) return parsed;
+  }
+  return null;
+}
+
 // Shared implementation for the oh-my-pi session format. omp and omo both
 // persist it verbatim, so they differ only in where the sessions live, which
 // cursor namespace they own, and how reasoning tokens are spelled.
@@ -15574,16 +15589,9 @@ async function parseOmpLikeIncremental({
         continue;
       }
 
-      // Prefer message-level timestamp (ms epoch); fall back to entry-level
-      // ISO string. Entries with no resolvable timestamp are skipped — they
-      // cannot be placed in a bucket.
-      let tsMs = null;
-      if (Number.isFinite(Number(msg.timestamp)) && Number(msg.timestamp) > 0) {
-        tsMs = Number(msg.timestamp);
-      } else if (typeof entry.timestamp === "string" && entry.timestamp) {
-        const parsed = Date.parse(entry.timestamp);
-        if (Number.isFinite(parsed) && parsed > 0) tsMs = parsed;
-      }
+      // Entries with no resolvable timestamp are skipped — they cannot be
+      // placed in a bucket.
+      const tsMs = ompEntryTimestampMs(msg, entry);
       if (tsMs == null) {
         seenIds.add(entryId);
         continue;
@@ -15707,13 +15715,7 @@ async function parseOmpLikeIncremental({
             continue;
           }
 
-          let tsMs = null;
-          if (Number.isFinite(Number(msg.timestamp)) && Number(msg.timestamp) > 0) {
-            tsMs = Number(msg.timestamp);
-          } else if (typeof entry.timestamp === "string" && entry.timestamp) {
-            const parsed = Date.parse(entry.timestamp);
-            if (Number.isFinite(parsed) && parsed > 0) tsMs = parsed;
-          }
+          const tsMs = ompEntryTimestampMs(msg, entry);
           const bucketStart = tsMs == null
             ? null
             : toUtcHalfHourStart(new Date(tsMs).toISOString());

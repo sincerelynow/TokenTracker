@@ -93,6 +93,8 @@ const {
   resolveDroidSessionsDir,
   resolveDshHomes,
   resolveDshSessionFiles,
+  resolveCommandCodeHomes,
+  resolveCommandCodeSessionFiles,
   resolveTraeStoragePath,
   readTraeEntitlementFromStorage,
   resolveGrokBuildSessions,
@@ -727,6 +729,20 @@ async function cmdStatus(argv = []) {
   const dshSessionsDir = dshHomes.map((homeDir) => path.join(homeDir, "sessions")).join(", ");
   const dshSessionFiles = await resolveDshSessionFiles(process.env, { trackerDir });
   const dshInstalled = dshSessionFiles.length > 0;
+  let commandCodeProjectsDir = "";
+  let commandCodeSessionFiles = [];
+  let commandCodeDiscoveryError = null;
+  try {
+    commandCodeProjectsDir = resolveCommandCodeHomes(process.env)
+      .map((homeDir) => path.join(homeDir, "projects"))
+      .join(", ");
+    commandCodeSessionFiles = await resolveCommandCodeSessionFiles(process.env);
+  } catch (error) {
+    // Discovery stays strict for sync, but a provider read error must not
+    // suppress the rest of the status diagnostics.
+    commandCodeDiscoveryError = `${error?.code ? `${error.code}: ` : ""}${error?.message || String(error)}`;
+  }
+  const commandCodeInstalled = commandCodeSessionFiles.length > 0;
   const lmstudioHome = resolveLmstudioHome(process.env);
   const lmstudioLogFiles = await resolveLmstudioLogFiles(process.env);
   const lmstudioInstalled = lmstudioLogFiles.length > 0;
@@ -1081,6 +1097,15 @@ async function cmdStatus(argv = []) {
         dsh: dshInstalled
           ? { installed: true, files: dshSessionFiles.length, detail: dshSessionsDir }
           : { installed: false },
+        "command-code": commandCodeInstalled
+          ? {
+              installed: true,
+              files: commandCodeSessionFiles.length,
+              detail: commandCodeProjectsDir,
+            }
+          : commandCodeDiscoveryError
+            ? { installed: false, error: commandCodeDiscoveryError }
+            : { installed: false },
         lmstudio: lmstudioInstalled
           ? {
               installed: true,
@@ -1286,6 +1311,11 @@ async function cmdStatus(argv = []) {
       dshInstalled
         ? `- DeepSeek Harness: passive reader (${dshSessionFiles.length} session${dshSessionFiles.length !== 1 ? "s" : ""} in ${dshSessionsDir})`
         : null,
+      commandCodeInstalled
+        ? `- Command Code: passive reader (${commandCodeSessionFiles.length} session${commandCodeSessionFiles.length !== 1 ? "s" : ""} in ${commandCodeProjectsDir})`
+        : commandCodeDiscoveryError
+          ? `- Command Code: discovery failed (${commandCodeDiscoveryError})`
+          : null,
       lmstudioInstalled
         ? `- LM Studio: passive reader (${lmstudioLogFiles.length} log${lmstudioLogFiles.length !== 1 ? "s" : ""} in ${path.join(lmstudioHome, "server-logs")})`
         : null,

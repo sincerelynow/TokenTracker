@@ -6,7 +6,7 @@
 
 ### 跨所有 CLI，看清你到底在 AI 上花了多少钱
 
-自动采集 **42 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
+自动采集 **43 款 AI 编码工具** 的 token 用量，全程本地聚合，用一套漂亮的 Dashboard 看真实成本与趋势。不需要云账号、不需要 API Key、不需要任何配置 —— 一条命令搞定。
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -109,7 +109,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ## ✨ 特性
 
-- 🔌 **开箱即用支持 42 款 AI 工具** —— Claude Code、Codex CLI、AStudio、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、OmO、pi、Dots、Prime Agent、Craft Agents、Reasonix、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、DeepSeek Harness、TRAE Work CN、LM Studio、Unsloth Studio、Devin CLI、Cline、MiniMax Code、Command Code
+- 🔌 **开箱即用支持 43 款 AI 工具** —— Claude Code、Codex CLI、AStudio、Cursor、Gemini CLI、Kiro、OpenCode、OpenClaw、Every Code、Hermes Agent、GitHub Copilot、Kimi Code、CodeBuddy、WorkBuddy、Grok Build、oh-my-pi、OmO、pi、Dots、Prime Agent、Craft Agents、Reasonix、Kilo CLI、Kilo Code、Roo Code、Antigravity、Zed Agent、Goose、Droid、Mimo Code、ZCode、Qoder、AnythingLLM Desktop、Claude Science、DeepSeek Harness、TRAE Work CN、LM Studio、Unsloth Studio、Devin CLI、Cline、MiniMax Code、Command Code、TRAE
 - 🏠 **本地优先** —— 跑在本地。直接在本地机器解析日志，无需账号或 API Key。
 - 🚀 **启动零改动** —— 首次运行不会修改 AI 工具配置；可在 Dashboard 手动管理可选集成
 - 🔄 **定时统计** —— CLI `serve` 每五分钟刷新全部本地来源，也可在设置 → 集成中点击“立即统计”
@@ -229,6 +229,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **Command Code** | ✅ 自动 | 被动会话读取器（`~/.commandcode/projects/<cwd-slug>/<session-id>.jsonl`，跳过 `*.checkpoints.jsonl` 快照与 `.prompts.` 辅助文件）。在本地扫描会话日志，提取选定的用量元数据，包括 token 计数与 CLI 的 `costUsd` 展示估算值；费用按 Token Tracker 的统一模型价目表估算。从包含缓存的 input 中同时扣除缓存读取和缓存写入，避免重复计数。Token Tracker 不保存或上传 prompt、回复或代码正文。可用 `TOKENTRACKER_COMMANDCODE_HOME` 覆盖目录 |
 | **Claude Science** | ✅ 自动 | 被动 SQLite 读取（`~/.claude-science/operon-cli.db`；只读取 `frames` 表的 token 计数，不读取 prompt、产物或研究内容）。没有原生 Windows 版——Windows 上该应用运行在 WSL 内，从 WSL 中读取。 |
 | **DeepSeek Harness** | ✅ 自动 | 被动读取会话日志（`~/.dsh/sessions/**/session.jsonl[.zstd]`；解析会话头部与 assistant 事件，支持多帧 zstd 解压） |
+| **TRAE（国际版）** | ✅ 自动 | 默认使用共享应用密钥读取 TRAE / TRAE SOLO 本地 SQLCipher 用量元数据；可通过 `TOKENTRACKER_TRAE_SQLCIPHER_KEY` 覆盖密钥。不调用厂商 API。[配置与限制](docs/trae.md)。 |
 | **TRAE Work CN** | ✅ 自动 | **需要显式开启：设置 `TOKENTRACKER_TRAE_CN_USAGE=1`。** 读取用量会把本地保存的登录授权发送到 TRAE 的内部 API，因此在你开启之前不会发出任何请求。开启后：仅在存在本地 TRAE Work CN 登录授权的可执行非后台同步期间，读取 macOS / Windows 本地登录应用的 session-token 用量；内部 API 可能变化 |
 
 > **如何管理插件 / Hook？** 打开本地 Dashboard 的**设置 → 集成**。启动和初始化不会改动任何 AI 工具配置：
@@ -252,7 +253,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 | 功能维度 | **[TokenTracker](https://github.com/xiufengsun/TokenTracker)** | **[ccusage](https://github.com/ccusage/ccusage)** | **[Tokscale](https://github.com/junhoyeo/tokscale)** |
 |---|:---:|:---:|:---:|
-| **支持的 AI 工具数** | **42** | 多 Agent / 工具支持 | 多 Agent / 工具支持 |
+| **支持的 AI 工具数** | **43** | 多 Agent / 工具支持 | 多 Agent / 工具支持 |
 | **主要交互方式** | 原生桌面 App 与 Web Dashboard | 终端命令行（CLI） | 终端 TUI 与 CLI |
 | **本地优先分析** | ✅ | ✅ | ✅ |
 | **原生桌面 App** | ✅ macOS、Windows、Linux | ❌ | ❌ |
@@ -268,7 +269,7 @@ brew install xiufengsun/tokentracker/tokentracker
 
 ```mermaid
 flowchart LR
-    A["AI 编码工具<br/>Claude Code · Codex · AStudio · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi · CodeBuddy · WorkBuddy · Grok · Kilo · Roo · Zed · Goose<br/>Antigravity · oh-my-pi · pi · Craft · Droid · Mimo · ZCode · Qoder · AnythingLLM · Claude Science · DeepSeek Harness · TRAE Work CN · LM Studio · Unsloth Studio · Devin CLI · MiniMax Code · Cline · Command Code"]
+    A["AI 编码工具<br/>Claude Code · Codex · AStudio · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot<br/>Kimi · CodeBuddy · WorkBuddy · Grok · Kilo · Roo · Zed · Goose<br/>Antigravity · oh-my-pi · pi · Craft · Droid · Mimo · ZCode · Qoder · AnythingLLM · Claude Science · DeepSeek Harness · TRAE · TRAE Work CN · LM Studio · Unsloth Studio · Devin CLI · MiniMax Code · Cline · Command Code"]
     A -->|hook 触发| B[Token Tracker]
     B -->|解析日志<br/>30 分钟 UTC 桶| C[(本地 SQLite)]
     C --> D[Web Dashboard]

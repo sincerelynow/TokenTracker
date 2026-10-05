@@ -36,6 +36,14 @@ const { computeRowCost, getModelPricing } = require("./pricing");
 const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
 const wsl = require("./wsl-probe");
 const { resolveCodexRootsSync } = require("./codex-roots");
+const {
+  appendUniqueDirs,
+  dedupeDirsByRealpath,
+  expandHome,
+  loadScanRootsConfig,
+  normalizeScanRootsConfig,
+  scanRootDirState,
+} = require("./scan-roots");
 
 // Bump the sidecar when derived metrics change so cached rows are rebuilt
 // instead of leaving the dashboard on the previous (over-counted) heuristic.
@@ -1093,8 +1101,11 @@ function providerRoots(home, providerDir, env, deps = {}) {
       && path.resolve(home) === path.resolve(homedir())
       && typeof env?.CODEX_HOME === "string"
       && env.CODEX_HOME.trim();
+    // Same normalization as sync / the cursor store (scan-roots.expandHome):
+    // a relative CODEX_HOME is anchored to home, never to process.cwd(), so
+    // the browser walks the exact root the cursors were keyed under.
     const nativeRoot = useProcessCodexHome
-      ? path.resolve(env.CODEX_HOME.trim())
+      ? expandHome(env.CODEX_HOME, home)
       : path.join(home, providerDir);
     roots.push(nativeRoot);
   }
@@ -1114,7 +1125,21 @@ function providerRoots(home, providerDir, env, deps = {}) {
     const wslRoot = discoverWslHome(providerDir, { env });
     if (wslRoot) roots.push(wslRoot);
   }
-  return [...new Set(roots)];
+  // Extra roots (#657), mirroring src/commands/sync.js: CLAUDE_CONFIG_DIR is
+  // the spawning process's implicit Claude root (additive — ~/.claude stays
+  // scanned), and config.scanRoots.<provider> arrives as deps.extraRoots from
+  // discoverSessionFiles. Extras are realpath-deduped against the roots above
+  // so one directory listed under two spellings is walked once.
+  const extras = [];
+  const useProcessClaudeConfigDir = providerDir === ".claude"
+    && path.resolve(home) === path.resolve(homedir())
+    && typeof env?.CLAUDE_CONFIG_DIR === "string"
+    && env.CLAUDE_CONFIG_DIR.trim();
+  if (useProcessClaudeConfigDir) extras.push(expandHome(env.CLAUDE_CONFIG_DIR, home));
+  for (const extra of Array.isArray(deps.extraRoots) ? deps.extraRoots : []) {
+    if (typeof extra === "string" && extra) extras.push(path.resolve(extra));
+  }
+  return appendUniqueDirs([...new Set(roots)], extras);
 }
 
 function codexProviderRootRecords(home, env, deps = {}) {
@@ -1132,6 +1157,7 @@ function codexProviderRootRecords(home, env, deps = {}) {
     platform,
     includeWsl: probeWsl,
     discoverWslHome,
+    ...(deps.scanRootsConfig !== undefined ? { scanRootsConfig: deps.scanRootsConfig } : {}),
   };
   if (!deps.resolveCodexRootsSync && typeof deps.resolveCodexRootPaths === "function") {
     return deps.resolveCodexRootPaths(resolverOptions).map((rootPath) => ({
@@ -1141,7 +1167,11 @@ function codexProviderRootRecords(home, env, deps = {}) {
     }));
   }
   const resolver = deps.resolveCodexRootsSync || resolveCodexRootsSync;
-  return resolver(resolverOptions).roots;
+  const state = resolver(resolverOptions);
+  if (!state.configured && Array.isArray(deps.extraRoots) && deps.extraRoots.length > 0) {
+    return resolver({ ...resolverOptions, scanRootsConfig: { codex: deps.extraRoots } }).roots;
+  }
+  return state.roots;
 }
 
 // Group one logical session discovered under more than one root. A group is
@@ -1271,14 +1301,42 @@ function groupCodexFiles(entries) {
 
 async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const grokHome = resolveGrokHome(home);
-  const claudeRoots = providerRoots(home, ".claude", env, deps);
+  // config.scanRoots (#657): read from the tracker config unless the caller
+  // injects it (tests). A missing or malformed config yields no extras.
+  const scanRootsConfig = deps.scanRootsConfig !== undefined
+    ? normalizeScanRootsConfig(deps.scanRootsConfig)
+    : await loadScanRootsConfig({ home });
+  // expandHome resolves `~` and relative entries against `home` (never cwd);
+  // only readable directories are walked, absence and stat errors alike.
+  const extraRootsFor = (provider) => scanRootsConfig[provider]
+    .map((root) => expandHome(root, home))
+    .filter((root) => root && scanRootDirState(root).exists);
+  const claudeRoots = providerRoots(home, ".claude", env, { ...deps, extraRoots: extraRootsFor("claude") });
   const codexRoots = Array.isArray(deps.codexRoots)
     ? deps.codexRoots
-    : codexProviderRootRecords(home, env, deps);
+    : codexProviderRootRecords(home, env, { ...deps, scanRootsConfig });
+  // Two distinct roots may share one projects/ dir through a symlink; dedupe
+  // the derived projects dirs by realpath (as sync does) so the browser never
+  // lists the same transcript twice under two spellings.
+  const claudeProjectsDirs = dedupeDirsByRealpath(claudeRoots.map((r) => path.join(r, "projects")));
+  // listClaudeProjectFiles / listRolloutFilesDeep turn a listing error into an
+  // empty result, so a root whose projects/ (or sessions/) exists but cannot be
+  // read would look like "no sessions" and get cached as such. Report those
+  // directories as incomplete discovery instead; the caller decides not to
+  // persist a partial inventory (sync defers its repair on the same state).
+  const incomplete = [];
+  for (const dir of [
+    ...claudeProjectsDirs,
+    ...codexRoots.map((r) => path.join(r.path, "sessions")),
+    ...codexRoots.map((r) => path.join(r.path, "archived_sessions")),
+  ]) {
+    const state = scanRootDirState(dir);
+    if (state.error !== null) incomplete.push({ path: dir, error: state.error });
+  }
   const [claudeGroups, codexGroups, archivedGroups, grok] = await Promise.all([
-    Promise.all(claudeRoots.map((r) => listClaudeProjectFiles(path.join(r, "projects")))),
-    Promise.all(codexRoots.map((root) => listRolloutFilesDeep(path.join(root.path, "sessions")))),
-    Promise.all(codexRoots.map((root) => listRolloutFilesDeep(path.join(root.path, "archived_sessions")))),
+    Promise.all(claudeProjectsDirs.map((dir) => listClaudeProjectFiles(dir))),
+    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r.path, "sessions")))),
+    Promise.all(codexRoots.map((r) => listRolloutFilesDeep(path.join(r.path, "archived_sessions")))),
     listGrokSessionFiles(path.join(grokHome, "sessions")),
   ]);
   const allClaude = groupClaudeFilesAcrossRoots(claudeGroups);
@@ -1293,7 +1351,7 @@ async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const claude = allClaude.filter((filePaths) => !filePaths.some((filePath) => filePath
     .split(path.sep)
     .some((segment) => segment.endsWith(CLAUDE_MEM_OBSERVER_PROJECT_SUFFIX))));
-  return { claude, codex: groupCodexFiles(codexEntries), grok };
+  return { claude, codex: groupCodexFiles(codexEntries), grok, incomplete };
 }
 
 function codexRootsSignature(roots) {
@@ -1302,6 +1360,19 @@ function codexRootsSignature(roots) {
     key: root.key || "",
     label: root.label || "",
   })))).digest("hex");
+}
+
+// Warn once per unreadable directory per process: the dashboard polls this
+// path, and a line per poll would flood the serve log.
+const warnedIncompleteDiscovery = new Set();
+function warnIncompleteDiscovery(incomplete) {
+  for (const entry of incomplete) {
+    if (warnedIncompleteDiscovery.has(entry.path)) continue;
+    warnedIncompleteDiscovery.add(entry.path);
+    if (!process.env.NODE_TEST_CONTEXT) {
+      console.warn(`[session-analytics] session directory unreadable (${entry.error}), inventory incomplete: ${entry.path}`);
+    }
+  }
 }
 
 function filesSignature(files) {
@@ -1433,6 +1504,19 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     } catch { /* first run */ }
   }
   const discovered = await discoverSessionFiles(home, process.env, { codexRoots });
+  // Incomplete discovery (an unreadable projects/ or sessions/ dir): never let
+  // a partial inventory replace a complete snapshot. Serve the last complete
+  // sidecar when there is one; otherwise build from what is readable but do
+  // not persist it, so the next refresh tries again.
+  const incompleteDirs = Array.isArray(discovered.incomplete) ? discovered.incomplete : [];
+  if (incompleteDirs.length > 0) {
+    warnIncompleteDiscovery(incompleteDirs);
+    if (!force && previousMeta?.version === SIDECAR_VERSION) {
+      const cached = readSidecar(sidecarPath);
+      Object.defineProperty(cached, "incompleteDirs", { value: incompleteDirs, enumerable: false });
+      return cached;
+    }
+  }
   // Codex thread titles are stored separately from rollout files. Include the
   // index in the overall signature so an index-only rename reaches the
   // per-file dependency check below on the next refresh. Grok titles/metadata
@@ -1512,20 +1596,23 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     nextFiles[cacheKey] = { stat_key: statKey };
   }
   sessions.sort((a, b) => String(b.ended_at || "").localeCompare(String(a.ended_at || "")));
-  const content = sessions.map(serializeSessionRecord).join("\n") + (sessions.length ? "\n" : "");
-  await writeAtomic(sidecarPath, content);
-  const generatedAt = new Date().toISOString();
-  await writeAtomic(metaPath, `${JSON.stringify({
-    version: SIDECAR_VERSION,
-    signature,
-    codex_roots_signature: rootSignature,
-    generated_at: generatedAt,
-    checked_at: generatedAt,
-    files: nextFiles,
-  })}\n`);
+  if (incompleteDirs.length === 0) {
+    const content = sessions.map(serializeSessionRecord).join("\n") + (sessions.length ? "\n" : "");
+    await writeAtomic(sidecarPath, content);
+    const generatedAt = new Date().toISOString();
+    await writeAtomic(metaPath, `${JSON.stringify({
+      version: SIDECAR_VERSION,
+      signature,
+      codex_roots_signature: rootSignature,
+      generated_at: generatedAt,
+      checked_at: generatedAt,
+      files: nextFiles,
+    })}\n`);
+  }
   // Non-enumerable so the array still behaves exactly like a plain row list
   // for every existing caller (map/filter/JSON of the rows is unaffected).
   Object.defineProperty(sessions, "skippedFiles", { value: skippedFiles, enumerable: false });
+  Object.defineProperty(sessions, "incompleteDirs", { value: incompleteDirs, enumerable: false });
   return sessions;
 }
 
@@ -2088,6 +2175,7 @@ module.exports = {
   resumeCommandFor,
   sessionsToCsv,
   providerRoots,
+  discoverSessionFiles,
   dedupeClaudeFilesAcrossRoots,
   analyticsEntryStatKey,
 };

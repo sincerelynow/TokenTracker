@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { getOrCreateInsforgeClient, isCloudInsforgeConfigured } from "../lib/insforge-config";
 import { resetCloudSyncAccountState, setCloudSyncAccountId, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
-import { getPublicVisibility } from "../lib/api";
+import { getPublicVisibility, invalidateAccountResponseCache } from "../lib/api";
 import { clearLocalApiAuthToken, getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import { copy } from "../lib/copy";
 import { getNativeOAuthBridge, isNativeLinuxApp, isNativeWindowsApp } from "../lib/native-bridge.js";
@@ -89,6 +89,10 @@ export function InsforgeAuthProvider({ children }) {
   useEffect(() => {
     if (!loading) setCloudSyncAccountId(typeof user?.id === "string" ? user.id : "");
   }, [loading, user?.id]);
+
+  useEffect(() => {
+    invalidateAccountResponseCache();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!isCloudInsforgeConfigured()) {
@@ -256,6 +260,7 @@ export function InsforgeAuthProvider({ children }) {
 
   const signOut = useCallback(async () => {
     if (!client) return;
+    invalidateAccountResponseCache();
     await client.auth.signOut();
     resetCloudSyncAccountState();
     setCloudSyncAccountId("");

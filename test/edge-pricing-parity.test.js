@@ -321,7 +321,7 @@ test("all cloud paths retain Codex root pricing and reasoning semantics", () => 
     const source = readEdge(name);
     assert.match(
       source,
-      /(?:row\.source|s)\.startsWith\("codex-root:"\)[\s\S]{0,80}"codex"/,
+      /(?:row\.source|s)\??\.startsWith\("codex-root:"\)[\s\S]{0,80}"codex"/,
       `${name}: public leaderboard must fold Codex roots into codex`,
     );
   }

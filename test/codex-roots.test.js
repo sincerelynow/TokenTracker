@@ -35,6 +35,29 @@ test("falls back to CODEX_HOME and then the default root", async (t) => {
   assert.deepEqual(fallback.roots.map((root) => root.path), [path.join(fx.home, ".codex")]);
 });
 
+test("upstream scanRoots share stable private identities, while Dashboard roots define the scan boundary", async (t) => {
+  const fx = await fixture(t);
+  const native = path.join(fx.home, ".codex");
+  const extra = path.join(fx.home, "agent", "codex");
+  const ignored = path.join(fx.home, "ignored");
+  for (const root of [native, extra, ignored]) await fs.mkdir(root, { recursive: true });
+  await fs.writeFile(fx.configPath, JSON.stringify({ scanRoots: { codex: [extra, extra, native] } }));
+  const options = { ...fx, env: {}, includeWsl: false };
+  const first = resolveCodexRootsSync(options);
+  assert.deepEqual(first.roots.map((root) => root.path), [native, extra]);
+  assert.equal(new Set(first.roots.map((root) => root.label)).size, 2);
+  assert.ok(first.roots.every((root) => root.stats_source === `codex-root:${root.key}`));
+  const otherProducer = resolveCodexRootsSync({ ...options, env: { CODEX_HOME: extra } });
+  assert.equal(otherProducer.roots.find((root) => root.path === extra).key, first.roots[1].key);
+  assert.ok(first.roots.every((root) => !root.stats_source.includes(fx.home)));
+
+  await saveCodexRoots([native], { ...options, env: { CODEX_HOME: ignored } });
+  const saved = resolveCodexRootsSync({ ...options, env: { CODEX_HOME: ignored } });
+  assert.equal(saved.configured, true);
+  assert.deepEqual(saved.roots.map((root) => root.path), [native]);
+  assert.deepEqual(JSON.parse(await fs.readFile(fx.configPath, "utf8")).scanRoots.codex, [extra, extra, native]);
+});
+
 test("saved roots override CODEX_HOME, expand tilde, dedupe, and preserve config fields", async (t) => {
   const fx = await fixture(t);
   const primary = path.join(fx.home, ".codex");

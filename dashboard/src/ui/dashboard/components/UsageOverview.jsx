@@ -351,6 +351,13 @@ export function UsageOverview({
     (provider) =>
       String(provider?.source || provider?.label || "").trim().toLowerCase() === "devin",
   );
+  // TRAE cost leaves out input without a cache split (docs/trae.md). Keep the
+  // caveat visible with the combined totals, including cloud data, which has
+  // no per-bucket marker.
+  const traeContributes = providers.some(
+    (provider) =>
+      String(provider?.source || provider?.label || "").trim().toLowerCase() === "trae",
+  );
   const allModels = useMemo(() => buildAllModels(fleetData), [fleetData]);
   const allUsage = allModels.reduce((sum, model) => sum + (Number(model.usage) || 0), 0);
   const allCost = meteredProviders.reduce((sum, provider) => sum + (Number(provider.usd) || 0), 0);
@@ -508,6 +515,12 @@ export function UsageOverview({
                 <span className="text-xl font-bold text-oai-brand">{summaryCostValue}</span>
               )}
             </div>
+          )}
+          {traeContributes && (
+            <p className="mx-auto mt-3 max-w-xl text-[11px] leading-snug text-oai-gray-500 dark:text-oai-gray-400">
+              <span className="font-medium">{copy("usage.overview.trae_notice_title")}.</span>{" "}
+              {copy("usage.overview.trae_notice_body")}
+            </p>
           )}
           {periodRangeLabel ? (
             <div className="mt-3 flex flex-col items-center gap-1 text-[11px] leading-snug text-oai-gray-400 dark:text-oai-gray-500">

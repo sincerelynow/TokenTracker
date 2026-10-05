@@ -1,4 +1,5 @@
 import { createClient } from "@insforge/sdk";
+import { functionUrlFor } from "./function-url";
 
 // Hosted dashboards use build-time config; local dashboards can use CLI config.
 const PROD_INSFORGE_BASE_URL = "";
@@ -92,6 +93,7 @@ export function getOrCreateInsforgeClient(): ReturnType<typeof createClient> | n
   if (!insforgeClientSingleton) {
     insforgeClientSingleton = createClient({
       baseUrl: getInsforgeBaseUrl(),
+      functionsUrl: functionUrlFor(getInsforgeRemoteUrl(), "").replace(/\/$/, ""),
       anonKey: getInsforgeAnonKey() || undefined,
     });
   }

@@ -8,6 +8,7 @@ const path = require("node:path");
 const { writeFileAtomic, chmod600IfPossible } = require("./fs");
 const wsl = require("./wsl-probe");
 const { resolveInstallPaths } = require("./install-resolver");
+const { resolveEnvRoot, resolveScanRoots, scanRootDirState } = require("./scan-roots");
 const {
   codexRootLabelFromKey,
   codexRootSource,
@@ -192,13 +193,14 @@ function resolveCodexRootsSync({
   platform = process.platform,
   includeWsl = true,
   discoverWslHome = wsl.discoverWslHome,
+  scanRootsConfig,
 } = {}) {
   const config = readConfig(configPath);
   const configured = Array.isArray(config.codexHomes) && config.codexHomes.length > 0;
   const source = configured ? "configured" : (typeof env?.CODEX_HOME === "string" && env.CODEX_HOME.trim() ? "environment" : "default");
   const rawRoots = configured
     ? config.codexHomes
-    : [source === "environment" ? env.CODEX_HOME.trim() : path.join(home, ".codex")];
+    : [resolveEnvRoot("codex", { env, home }) || path.join(home, ".codex")];
   const roots = normalizeRootRecords(rawRoots, { home, platform, requireExistingParent: false });
   const includeNative = platform !== "win32" || wsl.shouldProbeNative(env);
   const states = includeNative ? roots.map((root) => probeRoot(root.path, source, root)) : [];
@@ -226,6 +228,37 @@ function resolveCodexRootsSync({
         states.push(state);
       }
     }
+  }
+
+  // Dashboard codexHomes is an explicit scan boundary. Upstream scanRoots is
+  // additive only when that boundary has not been configured; every consumer
+  // still receives the same root identities and cursor paths from this resolver.
+  if (!configured && includeNative) {
+    const extras = resolveScanRoots({
+      home,
+      env: {},
+      config: scanRootsConfig === undefined ? config : { scanRoots: scanRootsConfig },
+    }).codex;
+    for (const entry of extras) {
+      let identity;
+      try {
+        identity = identityFor(entry.path, platform);
+      } catch {
+        identity = platform === "win32" ? path.win32.normalize(entry.realPath).toLowerCase() : path.normalize(entry.realPath);
+      }
+      if (states.some((root) => {
+        try { return identityFor(root.path, platform) === identity; } catch { return root.path === entry.path; }
+      })) continue;
+      const key = derivedRootKey(entry.path, identity);
+      let label = codexRootLabelFromKey(key);
+      if (states.some((root) => root.label?.toLowerCase() === label.toLowerCase())) {
+        label = `${label.slice(0, 55)}_${key.slice(-8).toUpperCase()}`;
+      }
+      states.push(probeRoot(entry.path, "config", { key, label }));
+    }
+  }
+  for (const state of states) {
+    Object.assign(state, scanRootDirState(state.path));
   }
 
   return { roots: states, configured, source, max_roots: MAX_CODEX_ROOTS };

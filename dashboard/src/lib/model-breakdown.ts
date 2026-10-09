@@ -115,6 +115,33 @@ const TOKEN_TOTAL_KEYS = [
   "reasoning_output_tokens",
 ];
 
+// Token-type split keys as carried on provider/all-model entries (`tokens`
+// object). Single source of truth for aggregation and the expandable UI rows.
+export const MODEL_TOKEN_SPLIT_KEYS = [
+  "input",
+  "output",
+  "cached",
+  "cacheCreate",
+  "reasoning",
+];
+
+/**
+ * Sum of one entry's token-type splits. Pure helper so .jsx consumers never
+ * need inline comparisons (keeps the ui-hardcode scanner quiet).
+ */
+export function modelTokenSplitsTotal(tokens: any) {
+  let total = 0;
+  for (const key of MODEL_TOKEN_SPLIT_KEYS) {
+    total += Math.max(0, Number(tokens?.[key]) || 0);
+  }
+  return total;
+}
+
+/** Whether a model entry carries backend token-type splits worth expanding. */
+export function hasModelTokenSplits(model: any) {
+  return modelTokenSplitsTotal(model?.tokens) > 0;
+}
+
 function addTotalsInto(target: any, add: any) {
   for (const key of TOKEN_TOTAL_KEYS) {
     target[key] = (Number(target[key]) || 0) + (Number(add?.[key]) || 0);
@@ -164,7 +191,7 @@ function mergeSourcesByAlias(sources: any[]) {
       if (!id) continue;
       let modelRow = merged.models.get(id);
       if (!modelRow) {
-        modelRow = { model: model?.model || id, model_id: id, totals: emptyTotals() };
+        modelRow = { ...model, model: model?.model || id, model_id: id, totals: emptyTotals() };
         merged.models.set(id, modelRow);
       }
       addTotalsInto(modelRow.totals, model?.totals);
@@ -176,6 +203,12 @@ function mergeSourcesByAlias(sources: any[]) {
   }));
 }
 
+/**
+ * Normalize the API model breakdown into provider-oriented fleet rows: one
+ * entry per source with totals, cache stats and its per-model ranking. Each
+ * model row carries the token-type splits (`tokens`) that feed the expandable
+ * detail rows in the All-models and per-provider lists.
+ */
 export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) {
   const safeCopy = typeof copyFn === "function" ? copyFn : (key: string) => key;
   const sources: any[] = mergeSourcesByAlias(
@@ -234,7 +267,26 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
               : entry.totalCost > 0 && entry.totalTokens > 0
                 ? (modelTokens / entry.totalTokens) * entry.totalCost
                 : null;
-          return { id, name, share, usage: modelTokens, cost: modelCost };
+          // Per-model token-type splits feed the expandable detail rows in
+          // the All-models and per-provider model lists. The API already
+          // returns them; previously they were dropped here.
+          const rawTotals = model?.totals || {};
+          return {
+            id,
+            name,
+            share,
+            usage: modelTokens,
+            cost: modelCost,
+            tokens: {
+              input: Math.max(0, toFiniteNumber(rawTotals?.input_tokens) ?? 0),
+              output: Math.max(0, toFiniteNumber(rawTotals?.output_tokens) ?? 0),
+              cached: Math.max(0, toFiniteNumber(rawTotals?.cached_input_tokens) ?? 0),
+              cacheCreate: Math.max(0, toFiniteNumber(rawTotals?.cache_creation_input_tokens) ?? 0),
+              reasoning: Math.max(0, toFiniteNumber(rawTotals?.reasoning_output_tokens) ?? 0),
+            },
+            pricing: model?.pricing || null,
+            costSource: model?.cost_source || null,
+          };
         })
         .filter(Boolean);
       // Input-side cache hit rate = cache reads / all input-side tokens
@@ -274,9 +326,15 @@ export function buildFleetData(modelBreakdown: any, { copyFn }: AnyRecord = {}) 
     const aggregateModels = new Map<string, any>();
     for (const card of familyCards) for (const model of card.models) {
       const key = String(model.id || model.name).toLowerCase();
-      const current = aggregateModels.get(key) || { ...model, usage: 0, cost: 0 };
+      const current = aggregateModels.get(key) || {
+        ...model, usage: 0, cost: 0,
+        tokens: Object.fromEntries(MODEL_TOKEN_SPLIT_KEYS.map((splitKey) => [splitKey, 0])),
+      };
       current.usage += Number(model.usage) || 0;
       current.cost += Number(model.cost) || 0;
+      for (const splitKey of MODEL_TOKEN_SPLIT_KEYS) {
+        current.tokens[splitKey] += Math.max(0, Number(model.tokens?.[splitKey]) || 0);
+      }
       aggregateModels.set(key, current);
     }
     const usage = familyCards.reduce((sum: number, card: any) => sum + card.usage, 0);
@@ -338,8 +396,14 @@ export function buildAllModels(fleetData: any) {
       cost: 0,
       hasCost: false,
       nameWeight: 0,
+      tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
     };
     current.usage += usage;
+    // Combine token-type splits across tools alongside the usage total.
+    const splits = model?.tokens || {};
+    for (const splitKey of MODEL_TOKEN_SPLIT_KEYS) {
+      current.tokens[splitKey] += Math.max(0, Number(splits[splitKey]) || 0);
+    }
     const cost = toFiniteNumber(model?.cost);
     if (cost != null) {
       current.cost += cost;
@@ -364,6 +428,7 @@ export function buildAllModels(fleetData: any) {
       name: model.name,
       usage: model.usage,
       cost: model.hasCost ? model.cost : null,
+      tokens: { ...model.tokens },
       share: totalUsage > 0
         ? Math.round((model.usage / totalUsage) * 1000) / 10
         : 0,

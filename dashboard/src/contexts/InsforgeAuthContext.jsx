@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { getOrCreateInsforgeClient, isCloudInsforgeConfigured } from "../lib/insforge-config";
-import { resetCloudSyncAccountState, setCloudSyncAccountId, setCloudSyncEnabled } from "../lib/cloud-sync-prefs";
+import { resetCloudSyncAccountState, setCloudSyncAccountId } from "../lib/cloud-sync-prefs";
 import { isLikelyExpiredAccessToken } from "../lib/auth-token";
 import { getPublicVisibility, invalidateAccountResponseCache } from "../lib/api";
 import { clearLocalApiAuthToken, getLocalApiAuthHeaders } from "../lib/local-api-auth";
@@ -262,15 +262,10 @@ export function InsforgeAuthProvider({ children }) {
     if (!client) return;
     invalidateAccountResponseCache();
     await client.auth.signOut();
+    // Clear account credentials and readiness while preserving the explicit
+    // sync preference for the next login, including a different account.
     resetCloudSyncAccountState();
     setCloudSyncAccountId("");
-    // Cloud sync requires an authenticated session, so disable it on sign-out.
-    // This also keeps signed-out dashboard loads instant: AccountViewContext's
-    // `resolving` gate only engages when cloud is the likely scope
-    // (expectCloud = authEnabled && (!localHost || cloudSyncOn)); leaving a
-    // stale cloudSyncOn=true would briefly gate a logged-out user behind the
-    // auth-loading window instead of painting local data immediately.
-    setCloudSyncEnabled(false);
     clearLocalApiAuthToken();
     setUser(null);
   }, [client]);

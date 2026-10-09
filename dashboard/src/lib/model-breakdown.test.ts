@@ -1,7 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { buildAllModels, buildFleetData, buildTopModels } from "./model-breakdown";
+import {
+  buildAllModels,
+  buildFleetData,
+  buildTopModels,
+  hasModelTokenSplits,
+  modelTokenSplitsTotal,
+} from "./model-breakdown";
 
 describe("buildFleetData", () => {
+  it.each(["codex", "dsh"])("sums all model token splits across %s roots and legacy usage once", (family) => {
+    const model = family === "codex" ? "gpt-6-sol" : "deepseek-v4-pro";
+    const pricing = { status: "priced", source: "curated", input: 1, output: 2 };
+    const sources = [family + "-root:primary-12345678", family + "-root:secondary-87654321", family];
+    const fleet = buildFleetData({ sources: sources.map((source, index) => {
+      const multiplier = index + 1;
+      const totals = { billable_total_tokens: 100 * multiplier, input_tokens: 50 * multiplier,
+        output_tokens: 20 * multiplier, cached_input_tokens: 15 * multiplier,
+        cache_creation_input_tokens: 10 * multiplier, reasoning_output_tokens: 5 * multiplier,
+        total_cost_usd: String(multiplier) };
+      return { source, totals, models: [{ model_id: model, totals, pricing, cost_source: "model_pricing" }] };
+    }) });
+    const aggregate = fleet.find((entry: any) => entry.isSyntheticAggregate);
+    const expectedTokens = { input: 300, output: 120, cached: 90, cacheCreate: 60, reasoning: 30 };
+    expect(aggregate.models).toHaveLength(1);
+    expect(aggregate.models[0]).toMatchObject({ usage: 600, cost: 6, tokens: expectedTokens, pricing });
+    expect(buildAllModels(fleet)).toEqual([expect.objectContaining({ usage: 600, cost: 6, tokens: expectedTokens })]);
+    const roots = fleet.filter((entry: any) => !entry.isSyntheticAggregate && !entry.isHiddenProvider);
+    expect(roots.map((entry: any) => entry.models[0].tokens.input).sort((a: number, b: number) => a - b)).toEqual([50, 100]);
+  });
+
   it("builds independent Codex root cards plus one non-metered aggregate", () => {
     const fleet = buildFleetData({
       sources: [
@@ -167,6 +194,19 @@ describe("buildFleetData", () => {
   });
 });
 
+describe("modelTokenSplitsTotal / hasModelTokenSplits", () => {
+  it("sums splits and reports expandability", () => {
+    expect(modelTokenSplitsTotal(undefined)).toBe(0);
+    expect(modelTokenSplitsTotal({})).toBe(0);
+    expect(
+      modelTokenSplitsTotal({ input: 10, output: 5, cached: 0, cacheCreate: 0, reasoning: 0 }),
+    ).toBe(15);
+    expect(hasModelTokenSplits({ tokens: { input: 1 } })).toBe(true);
+    expect(hasModelTokenSplits({})).toBe(false);
+    expect(hasModelTokenSplits(null)).toBe(false);
+  });
+});
+
 describe("buildAllModels", () => {
   it("combines the same model across tools and ranks every personal model", () => {
     const models = buildAllModels([
@@ -187,9 +227,107 @@ describe("buildAllModels", () => {
     ]);
 
     expect(models).toEqual([
-      { id: "gpt-5.6", name: "GPT-5.6", usage: 100, cost: 1, share: 50 },
-      { id: "claude-sonnet", name: "claude-sonnet", usage: 80, cost: null, share: 40 },
-      { id: "gpt-5.5", name: "gpt-5.5", usage: 20, cost: 0.2, share: 10 },
+      {
+        id: "gpt-5.6",
+        name: "GPT-5.6",
+        usage: 100,
+        cost: 1,
+        tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
+        share: 50,
+      },
+      {
+        id: "claude-sonnet",
+        name: "claude-sonnet",
+        usage: 80,
+        cost: null,
+        tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
+        share: 40,
+      },
+      {
+        id: "gpt-5.5",
+        name: "gpt-5.5",
+        usage: 20,
+        cost: 0.2,
+        tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
+        share: 10,
+      },
+    ]);
+  });
+
+  it("combines per-model token-type splits across tools", () => {
+    const models = buildAllModels([
+      {
+        label: "CODEX",
+        models: [
+          {
+            id: "gpt-5.6",
+            name: "gpt-5.6",
+            usage: 100,
+            cost: 1,
+            tokens: { input: 10, output: 5, cached: 80, cacheCreate: 4, reasoning: 1 },
+          },
+        ],
+      },
+      {
+        label: "CURSOR",
+        models: [
+          {
+            id: "gpt-5.6",
+            name: "gpt-5.6",
+            usage: 50,
+            cost: 0.5,
+            tokens: { input: 20, output: 10, cached: 15, cacheCreate: 5, reasoning: 0 },
+          },
+        ],
+      },
+    ]);
+
+    expect(models).toEqual([
+      {
+        id: "gpt-5.6",
+        name: "gpt-5.6",
+        usage: 150,
+        cost: 1.5,
+        tokens: { input: 30, output: 15, cached: 95, cacheCreate: 9, reasoning: 1 },
+        share: 100,
+      },
+    ]);
+  });
+
+  it("carries API token totals through buildFleetData provider models", () => {
+    const fleet = buildFleetData({
+      sources: [
+        {
+          source: "opencode",
+          totals: { billable_total_tokens: 300 },
+          models: [
+            {
+              model_id: "gpt-6.1-sol-fast",
+              totals: {
+                billable_total_tokens: 300,
+                input_tokens: 100,
+                output_tokens: 20,
+                cached_input_tokens: 170,
+                cache_creation_input_tokens: 5,
+                reasoning_output_tokens: 5,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(fleet[0].models).toEqual([
+      {
+        id: "gpt-6.1-sol-fast",
+        name: "gpt-6.1-sol-fast",
+        share: 100,
+        usage: 300,
+        cost: 0,
+        tokens: { input: 100, output: 20, cached: 170, cacheCreate: 5, reasoning: 5 },
+        pricing: null,
+        costSource: null,
+      },
     ]);
   });
 });

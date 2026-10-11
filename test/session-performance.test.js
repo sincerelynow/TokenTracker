@@ -288,7 +288,7 @@ test("nonzero unknown Claude usage remains in model totals and partial cost", as
 });
 
 
-test("version 14 sidecars rebuild root identity and request performance before cache reuse", async (t) => {
+for (const version of [14, 15, 16]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
   const rows = [context(0), output(5, "function_call"), count(10, usage(300))];
   const { home } = fixture(t, rows, "codex");
   const tracker = path.join(home, ".tokentracker/tracker");
@@ -298,22 +298,26 @@ test("version 14 sidecars rebuild root identity and request performance before c
   const sidecar = path.join(tracker, "session.queue.jsonl");
   const metaPath = sidecar + ".meta.json";
   const stale = JSON.parse(fs.readFileSync(sidecar, "utf8").trim());
-  stale.version = 14;
+  stale.version = version;
   stale.source_instance = "stale-root";
   stale.instance_label = "STALE";
+  delete stale.session_store_bytes;
+  delete stale.session_store_metric;
   delete stale.performance;
   for (const model of stale.model_usage) delete model.performance;
   fs.writeFileSync(sidecar, JSON.stringify(stale) + "\n");
   const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
-  meta.version = 14;
+  meta.version = version;
   fs.writeFileSync(metaPath, JSON.stringify(meta));
   const rebuilt = (await buildSessionAnalytics({ home }))[0];
-  assert.equal(rebuilt.version, 15);
+  assert.equal(rebuilt.version, 17);
+  assert.equal(rebuilt.session_store_bytes, cold.session_store_bytes);
+  assert.ok(rebuilt.session_store_bytes > 0);
   assert.equal(rebuilt.source, "codex");
   assert.equal(rebuilt.source_instance, "primary-12345678");
   assert.equal(rebuilt.instance_label, "CODEX");
   assert.deepEqual(rebuilt.performance, cold.performance);
   assert.ok(rebuilt.performance.estimated_tokens_per_second > 0);
   assert.deepEqual(rebuilt.model_usage[0].performance, cold.model_usage[0].performance);
-  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 15);
+  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 17);
 });

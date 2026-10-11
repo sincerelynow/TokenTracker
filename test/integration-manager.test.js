@@ -139,3 +139,32 @@ test("integration manager detects and safely removes the legacy OpenClaw hook", 
     await fs.rm(home, { recursive: true, force: true });
   }
 });
+
+test("WorkBuddy AI manual management honors its home override and preserves unrelated hooks", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tt-integrations-workbuddy-ai-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const trackerDir = path.join(home, "tracker");
+  const binDir = path.join(home, "bin");
+  const settingsPath = path.join(home, "international", "settings.json");
+  const domesticPath = path.join(home, ".workbuddy", "settings.json");
+  const existing = { hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "custom-hook" }] }] } };
+  for (const file of [settingsPath, domesticPath]) {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, JSON.stringify(existing));
+  }
+  const domesticBefore = await fs.readFile(domesticPath, "utf8");
+  const options = { home, trackerDir, binDir, env: { HOME: home, WORKBUDDY_AI_HOME: "~/international" } };
+  const before = (await listIntegrations(options)).find((item) => item.id === "workbuddy-ai");
+  assert.equal(before.detected, true);
+  assert.equal(before.installed, false);
+  assert.equal(await fs.readFile(settingsPath, "utf8"), domesticBefore);
+  const installed = await mutateIntegration("workbuddy-ai", "install", options);
+  assert.equal(installed.integration.installed, true);
+  assert.match(await fs.readFile(settingsPath, "utf8"), /--source=workbuddy-ai/);
+  assert.equal(await fs.readFile(domesticPath, "utf8"), domesticBefore);
+  const removed = await uninstallAllIntegrations(options);
+  assert.equal(removed.find((item) => item.id === "workbuddy-ai").result.removed, true);
+  assert.match(await fs.readFile(settingsPath, "utf8"), /custom-hook/);
+  assert.doesNotMatch(await fs.readFile(settingsPath, "utf8"), /notify\.cjs/);
+  assert.equal(await fs.readFile(domesticPath, "utf8"), domesticBefore);
+});

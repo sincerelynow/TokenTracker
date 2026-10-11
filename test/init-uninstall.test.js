@@ -3,6 +3,8 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const { test } = require("node:test");
+const publicAnon = [Buffer.from('{"alg":"HS256"}').toString("base64url"),
+  Buffer.from('{"role":"anon"}').toString("base64url"), "test-signature"].join(".");
 
 // These tests only exercise hook/config/notify wiring, never the copied runtime
 // or a real first sync. Skip both so each cmdInit doesn't copy ~10 MB and spawn
@@ -80,6 +82,12 @@ async function waitForFile(filePath, { timeoutMs = 1500, intervalMs = 50 } = {})
   return null;
 }
 
+function completedMarkerScript(markerPath, valueSource) {
+  // A marker becomes visible only after its payload is complete. Keep empty
+  // content observable as a failure rather than teaching readers to ignore it.
+  return `const fs = require('node:fs');\nconst marker = ${JSON.stringify(markerPath)};\nfs.writeFileSync(marker + '.tmp', ${valueSource});\nfs.renameSync(marker + '.tmp', marker);`;
+}
+
 function flattenHookEntries(entries) {
   return entries.flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : [entry]));
 }
@@ -155,7 +163,7 @@ test("notify handler runs local source sync without a cloud device token", async
     await fs.mkdir(path.dirname(trackerBinPath), { recursive: true });
     await fs.writeFile(
       trackerBinPath,
-      `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify(process.argv.slice(2)));\n`,
+      `${completedMarkerScript(markerPath, "JSON.stringify(process.argv.slice(2))")}\n`,
       "utf8",
     );
     await fs.writeFile(
@@ -182,7 +190,9 @@ test("notify handler runs local source sync without a cloud device token", async
   }
 });
 
-test("notify handler chains executable original notify commands and skips stale explicit paths", async () => {
+test("notify handler chains executable original notify commands and skips stale explicit paths", {
+  skip: process.platform === "win32" && "Fixture launches a POSIX shebang executable; Windows Node notify chaining is covered separately",
+}, async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
     const markerPath = path.join(tmp, "unsafe-marker");
@@ -205,7 +215,7 @@ test("notify handler chains executable original notify commands and skips stale 
     await fs.mkdir(skyDir, { recursive: true });
     await fs.writeFile(
       skyPath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "'ran'")}\n`,
       "utf8",
     );
     await fs.chmod(skyPath, 0o755);
@@ -236,7 +246,7 @@ test("notify handler skips an original notify that nests itself", async () => {
     const skyPath = path.join(tmp, "SkyComputerUseClient");
     await fs.writeFile(
       skyPath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "'ran'")}\n`,
       "utf8",
     );
     await fs.chmod(skyPath, 0o755);
@@ -269,7 +279,7 @@ test("notify handler skips a nested self notify referenced through a symlinked p
     const skyPath = path.join(tmp, "SkyComputerUseClient");
     await fs.writeFile(
       skyPath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "'ran'")}\n`,
       "utf8",
     );
     await fs.chmod(skyPath, 0o755);
@@ -301,7 +311,7 @@ test("notify handler skips a stale nested notify pointing into a .tokentracker d
     await fs.mkdir(trackerDir, { recursive: true });
     await fs.writeFile(
       skyPath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'ran');\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "'ran'")}\n`,
       "utf8",
     );
     await fs.chmod(skyPath, 0o755);
@@ -329,7 +339,7 @@ test("notify handler avoids duplicating existing payload args when chaining", as
     const shimPath = path.join(tmp, "dedupe-notify.js");
     await fs.writeFile(
       shimPath,
-      `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
 
@@ -353,7 +363,7 @@ test("notify handler skips interpreter original notify when script target is mis
     const missingScriptPath = path.join(tmp, "missing-notify.js");
     await fs.writeFile(
       fakeNodePath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
     await fs.chmod(fakeNodePath, 0o755);
@@ -383,7 +393,7 @@ test("notify handler skips node-like original notify without a script target", a
     const fakeNodePath = path.join(tmp, "node");
     await fs.writeFile(
       fakeNodePath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
     await fs.chmod(fakeNodePath, 0o755);
@@ -416,7 +426,9 @@ test("notify handler skips node-like original notify without a script target", a
   }
 });
 
-test("notify handler validates env split-string interpreter targets", async () => {
+test("notify handler validates env split-string interpreter targets", {
+  skip: process.platform === "win32" && "Fixture requires the POSIX env interpreter and shebang execution",
+}, async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
     const markerPath = path.join(tmp, "env-split-marker");
@@ -426,7 +438,7 @@ test("notify handler validates env split-string interpreter targets", async () =
     const spawnCapture = { command: fakeEnvPath, markerPath };
     await fs.writeFile(
       fakeEnvPath,
-      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `#!/usr/bin/env node\n${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
     await fs.chmod(fakeEnvPath, 0o755);
@@ -605,7 +617,9 @@ test("notify handler validates env split-string interpreter targets", async () =
   }
 });
 
-test("notify handler treats exe-suffixed runtimes as node-like interpreters", async () => {
+test("notify handler treats exe-suffixed runtimes as node-like interpreters", {
+  skip: process.platform === "win32" && "Fixture uses shebang scripts named .exe rather than Windows PE executables",
+}, async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
     for (const runtimeName of ["node", "bun", "deno"]) {
@@ -656,7 +670,9 @@ test("notify handler treats exe-suffixed runtimes as node-like interpreters", as
   }
 });
 
-test("notify handler skips bun and deno original notify when payload token is not a script", async () => {
+test("notify handler skips bun and deno original notify when payload token is not a script", {
+  skip: process.platform === "win32" && "Fixture creates POSIX shebang Bun and Deno launchers",
+}, async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-notify-chain-"));
   try {
     const fakeEnvPath = path.join(tmp, "env");
@@ -669,7 +685,7 @@ test("notify handler skips bun and deno original notify when payload token is no
       const lockFilePath = path.join(tmp, `${runtimeName}-lock.json`);
       await fs.writeFile(
         fakeRuntimePath,
-        `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+        `#!/usr/bin/env node\nconst fs = require('node:fs');\nconst marker = ${JSON.stringify(markerPath)};\nfs.writeFileSync(marker + '.tmp', process.argv.slice(2).join('|'));\nfs.renameSync(marker + '.tmp', marker);\n`,
         "utf8",
       );
       await fs.chmod(fakeRuntimePath, 0o755);
@@ -831,7 +847,7 @@ test("notify handler preserves legitimate repeated payload args when chaining", 
     const shimPath = path.join(tmp, "repeat-notify.js");
     await fs.writeFile(
       shimPath,
-      `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
 
@@ -1186,7 +1202,7 @@ test("notify handler still chains normal original notify commands", async () => 
     const shimPath = path.join(tmp, "safe-notify.js");
     await fs.writeFile(
       shimPath,
-      `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
 
@@ -1210,7 +1226,7 @@ test("notify handler chains the independent Acode original notify", async () => 
     const shimPath = path.join(tmp, "acode-notify.js");
     await fs.writeFile(
       shimPath,
-      `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, process.argv.slice(2).join('|'));\n`,
+      `${completedMarkerScript(markerPath, "process.argv.slice(2).join('|')")}\n`,
       "utf8",
     );
 
@@ -1251,8 +1267,10 @@ test("init preserves existing config fields and custom URLs", async () => {
         {
           installedAt: "2026-04-01T00:00:00.000Z",
           baseUrl: "https://self-hosted.example",
+          anonKey: publicAnon,
           dashboardUrl: "https://dashboard.example",
           deviceToken: "device-token",
+          deviceTokenBaseUrl: "https://self-hosted.example",
           deviceId: "device-id",
           customFlag: true,
         },
@@ -1310,7 +1328,7 @@ test("init then uninstall restores original Codex notify (when pre-existing noti
     await fs.writeFile(codexConfigPath, originalNotify, "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const installed = await fs.readFile(codexConfigPath, "utf8");
     assert.match(installed, /^notify\s*=\s*\[.+\]\s*$/m);
@@ -1375,7 +1393,7 @@ test("init refreshes stale Codex backup when current notify is external", async 
     await fs.writeFile(codexConfigPath, `notify = ${JSON.stringify(externalNotify)}\n`, "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const original = JSON.parse(
       await fs.readFile(path.join(trackerDir, "codex_notify_original.json"), "utf8"),
@@ -1427,7 +1445,7 @@ test("init clears stale Codex backup when current notify is absent", async () =>
     await fs.writeFile(codexConfigPath, "model = \"gpt-5\"\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const original = JSON.parse(await fs.readFile(notifyOriginalPath, "utf8"));
     assert.equal(original.notify, null);
@@ -1481,7 +1499,7 @@ test("init then uninstall removes notify when none existed", async () => {
     await fs.writeFile(codexConfigPath, "# empty\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const installed = await fs.readFile(codexConfigPath, "utf8");
     assert.match(installed, /^notify\s*=\s*\[.+\]\s*$/m);
@@ -1566,7 +1584,7 @@ test("init skips Codex notify when config is missing", async () => {
     process.env.OPENCODE_CONFIG_DIR = path.join(tmp, ".config", "opencode");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const codexConfigPath = path.join(process.env.CODEX_HOME, "config.toml");
     await assert.rejects(fs.stat(codexConfigPath), /ENOENT/);
@@ -1611,7 +1629,7 @@ test("init then uninstall restores original Every Code notify (when config exist
     await fs.writeFile(codeConfigPath, originalNotify, "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const installed = await fs.readFile(codeConfigPath, "utf8");
     assert.match(installed, /notify\s*=\s*\[[^\n]*notify\.cjs[^\n]*--source=every-code[^\n]*\]/);
@@ -1664,7 +1682,7 @@ test("init then uninstall restores original Acode notify", async () => {
     await fs.writeFile(acodeConfigPath, 'notify = ["echo", "hello-acode"]\n', "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const installed = await fs.readFile(acodeConfigPath, "utf8");
     assert.match(installed, /notify\s*=\s*\[[^\n]*notify\.cjs[^\n]*--source=acode[^\n]*\]/);
@@ -1723,7 +1741,7 @@ test("init clears stale Every Code backup when current notify is absent", async 
     await fs.writeFile(codeConfigPath, "model = \"gpt-5\"\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const original = JSON.parse(await fs.readFile(notifyOriginalPath, "utf8"));
     assert.equal(original.notify, null);
@@ -1783,7 +1801,7 @@ test("init refreshes stale Every Code backup when current notify is external", a
     await fs.writeFile(codeConfigPath, `notify = ${JSON.stringify(externalNotify)}\n`, "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const original = JSON.parse(await fs.readFile(notifyOriginalPath, "utf8"));
     assert.deepEqual(original.notify, externalNotify);
@@ -1829,7 +1847,7 @@ test("init skips Every Code notify when config is missing", async () => {
     await fs.writeFile(codexConfigPath, "# empty\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const codeConfigPath = path.join(process.env.CODE_HOME, "config.toml");
     await assert.rejects(fs.stat(codeConfigPath), /ENOENT/);
@@ -1981,7 +1999,7 @@ test("init then uninstall manages Claude hooks without removing existing hooks",
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const installedRaw = await fs.readFile(settingsPath, "utf8");
     const installed = JSON.parse(installedRaw);
@@ -2071,7 +2089,7 @@ test("init then uninstall manages Gemini hooks without removing existing hooks",
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const installedRaw = await fs.readFile(settingsPath, "utf8");
     const installed = JSON.parse(installedRaw);
@@ -2142,7 +2160,7 @@ test("init skips Gemini hooks when config directory is missing", async () => {
     await fs.writeFile(codexConfigPath, "# empty\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     await assert.rejects(fs.stat(process.env.GEMINI_HOME), /ENOENT/);
   } finally {
@@ -2184,7 +2202,7 @@ test("init creates Gemini settings when directory exists but file is missing", a
     const settingsPath = path.join(process.env.GEMINI_HOME, "settings.json");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const createdRaw = await fs.readFile(settingsPath, "utf8");
     const created = JSON.parse(createdRaw);
@@ -2234,7 +2252,7 @@ test("init then uninstall manages Opencode plugin without removing other plugins
     await fs.writeFile(existingPluginPath, "// existing\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const pluginPath = path.join(pluginDir, "tokentracker.js");
     const installed = await fs.readFile(pluginPath, "utf8");
@@ -2277,7 +2295,7 @@ test("init installs Opencode plugin when config dir is missing", async () => {
     await fs.writeFile(codexConfigPath, "# empty\n", "utf8");
 
     process.stdout.write = () => true;
-    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid"]);
+    await cmdInit(["--yes", "--no-auth", "--no-open", "--base-url", "https://example.invalid", "--anon-key", publicAnon]);
 
     const pluginPath = path.join(process.env.OPENCODE_CONFIG_DIR, "plugin", "tokentracker.js");
     const installed = await fs.readFile(pluginPath, "utf8");

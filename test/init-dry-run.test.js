@@ -3,6 +3,8 @@ const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const { test } = require("node:test");
+const publicAnon = [Buffer.from('{"alg":"HS256"}').toString("base64url"),
+  Buffer.from('{"role":"anon"}').toString("base64url"), "test-signature"].join(".");
 
 const { cmdInit } = require("../src/commands/init");
 const { withHome } = require("./helpers/with-home");
@@ -37,6 +39,7 @@ test("dry-run reports that integrations are managed from the Dashboard", async (
       "--no-open",
       "--base-url",
       "https://example.invalid",
+      "--anon-key", publicAnon,
     ]);
 
     const clean = stripAnsi(output);

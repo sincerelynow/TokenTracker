@@ -51,6 +51,7 @@ const {
 const { probeOpenclawHookState, removeOpenclawHookConfig } = require("./openclaw-hook");
 const { probeGrokHookState, removeGrokHook, upsertGrokHook } = require("./grok-hook");
 const { probeOmpHookState, removeOmpHook, upsertOmpHook } = require("./omp-hook");
+const { expandHome } = require("./scan-roots");
 const { resolveTrackerPaths } = require("./tracker-paths");
 
 const operationLocks = new Map();
@@ -81,6 +82,7 @@ function buildContext({ home, trackerDir, binDir, env }) {
   const claudeDir = path.join(home, ".claude");
   const codebuddyDir = env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
   const workbuddyDir = env.WORKBUDDY_HOME || path.join(home, ".workbuddy");
+  const workbuddyAiDir = expandHome(env.WORKBUDDY_AI_HOME, home) || path.join(home, ".workbuddy-ai");
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: integrationEnv });
   return {
     home,
@@ -97,6 +99,8 @@ function buildContext({ home, trackerDir, binDir, env }) {
     codebuddySettingsPath: path.join(codebuddyDir, "settings.json"),
     workbuddyDir,
     workbuddySettingsPath: path.join(workbuddyDir, "settings.json"),
+    workbuddyAiDir,
+    workbuddyAiSettingsPath: path.join(workbuddyAiDir, "settings.json"),
     geminiConfigDir,
     geminiSettingsPath: resolveGeminiSettingsPath({ configDir: geminiConfigDir }),
     opencodeConfigDir: resolveOpencodeConfigDir({ home, env: integrationEnv }),
@@ -265,6 +269,7 @@ const adapters = [
   ...[
     ["codebuddy", "CodeBuddy", "codebuddyDir", "codebuddySettingsPath"],
     ["workbuddy", "WorkBuddy", "workbuddyDir", "workbuddySettingsPath"],
+    ["workbuddy-ai", "WorkBuddy AI", "workbuddyAiDir", "workbuddyAiSettingsPath"],
   ].map(([id, label, dirKey, settingsKey]) => ({
     id,
     label,

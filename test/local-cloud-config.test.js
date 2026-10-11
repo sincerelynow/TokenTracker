@@ -26,14 +26,14 @@ test("local dashboard cloud config reads public URL/key from config.json on ever
   const configPath = path.join(dir, "config.json");
   const handler = createLocalApiHandler({ queuePath: path.join(dir, "queue.jsonl") });
 
-  fs.writeFileSync(configPath, JSON.stringify({ baseUrl: "https://one.example", anonKey: "public-one", deviceToken: "private-token" }));
+  fs.writeFileSync(configPath, JSON.stringify({ baseUrl: "https://one.example", anonKey: "anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", deviceToken: "private-token" }));
   const first = await requestCloudConfig(handler);
   assert.equal(first.status, 200);
   assert.equal(first.headers["Cache-Control"], "no-store");
-  assert.deepEqual(first.body, { baseUrl: "https://one.example", anonKey: "public-one" });
+  assert.deepEqual(first.body, { baseUrl: "https://one.example", anonKey: "anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" });
 
-  fs.writeFileSync(configPath, JSON.stringify({ baseUrl: "https://two.example", anonKey: "public-two" }));
-  assert.deepEqual((await requestCloudConfig(handler)).body, { baseUrl: "https://two.example", anonKey: "public-two" });
+  fs.writeFileSync(configPath, JSON.stringify({ baseUrl: "https://two.example", anonKey: "anon_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }));
+  assert.deepEqual((await requestCloudConfig(handler)).body, { baseUrl: "https://two.example", anonKey: "anon_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" });
 
   fs.writeFileSync(configPath, JSON.stringify({ baseUrl: "https://two.example" }));
   assert.deepEqual((await requestCloudConfig(handler)).body, { baseUrl: "", anonKey: "" });

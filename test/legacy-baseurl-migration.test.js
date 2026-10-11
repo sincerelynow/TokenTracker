@@ -17,7 +17,7 @@ const {
 
 const LEGACY_BASE_URL = "https://b46ug8xu.us-east.insforge.app";
 const PERSONAL_BASE_URL = "https://personal.example";
-const PERSONAL_ANON_KEY = "anon_personal_fixture";
+const PERSONAL_ANON_KEY = "anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 async function withTempHome(fn) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "tokentracker-legacy-baseurl-"));
@@ -185,6 +185,7 @@ test("a persisted upstream default does not suppress first publication to a pers
       config: {
         baseUrl: "https://srctyff5.us-east.insforge.app",
         deviceToken: "personal-fixture-token",
+        deviceTokenBaseUrl: PERSONAL_BASE_URL,
       },
       queue,
       queueState: { offset: Buffer.byteLength(queue) },
@@ -286,6 +287,15 @@ test("sync preserves the legacy device token and replays the queue to the curren
       "utf8",
     );
     await cmdSync(["--auto", "--publish-account"]);
+    const held = await readJsonFile(path.join(trackerDir, "queue.state.json"));
+    assert.equal(held.offset, Buffer.byteLength(queue), "a native automatic tick honors the new fifteen-minute interval");
+    assert.equal(ingestCalls.length, 1);
+    const throttlePath = path.join(trackerDir, "upload.throttle.json");
+    const deadline = await readJsonFile(throttlePath);
+    deadline.lastSuccessMs = Date.now() - 17 * 60_000;
+    deadline.nextAllowedAtMs = deadline.lastSuccessMs + 15 * 60_000;
+    await fs.writeFile(throttlePath, JSON.stringify(deadline), "utf8");
+    await cmdSync(["--auto", "--publish-account"]);
     const after = await readJsonFile(path.join(trackerDir, "queue.state.json"));
     assert.equal(after.offset, Buffer.byteLength(queue) + Buffer.byteLength(pendingLine));
     assert.equal(after.note, "manual");
@@ -380,6 +390,7 @@ test("sync removes an unchanged legacy anon key after a concurrent login updates
               baseUrl: PERSONAL_BASE_URL,
               anonKey: "legacy-anon-key",
               deviceToken: "current-login-token",
+              deviceTokenBaseUrl: PERSONAL_BASE_URL,
               user_id: "current-user",
               machineId: "machine-1",
             }),
@@ -418,6 +429,13 @@ test("sync removes an unchanged legacy anon key after a concurrent login updates
     await fs.appendFile(path.join(trackerDir, "queue.jsonl"), pendingLine, "utf8");
     await cmdSync(["--auto", "--publish-account"]);
 
+    assert.equal(ingestCalls.length, 1, "new pending rows stay queued through the automatic cooldown");
+    const throttlePath = path.join(trackerDir, "upload.throttle.json");
+    const deadline = await readJsonFile(throttlePath);
+    deadline.lastSuccessMs = Date.now() - 17 * 60_000;
+    deadline.nextAllowedAtMs = deadline.lastSuccessMs + 15 * 60_000;
+    await fs.writeFile(throttlePath, JSON.stringify(deadline), "utf8");
+    await cmdSync(["--auto", "--publish-account"]);
     assert.equal(ingestCalls.length, 2);
     assert.equal(ingestCalls[1].headers.apikey, PERSONAL_ANON_KEY);
     assert.equal(ingestCalls[1].headers.Authorization, "Bearer current-login-token");
@@ -685,7 +703,9 @@ test("a partial non-auth upload failure resumes after the committed offset", asy
 test("sync verifies a replacement by replaying local history for a new account checkpoint", async () => {
   await withTempHome(async (home) => {
     const trackerDir = await writeTrackerState(home, {});
-    await cmdSync(["--auto"]);
+    // Restrict parsing to the isolated Codex root; other Windows providers may
+    // discover real history under AppData even when the fixture home is empty.
+    await cmdSync(["--auto", "--from-notify", "--source", "codex"]);
 
     await writeTrackerState(home, {
       config: {
@@ -702,7 +722,7 @@ test("sync verifies a replacement by replaying local history for a new account c
     global.fetch = successfulFetch(() => {
       ingestCalls += 1;
     });
-    await cmdSync(["--auto"]);
+    await cmdSync(["--auto", "--from-notify", "--source", "codex"]);
 
     const config = await readJsonFile(path.join(trackerDir, "config.json"));
     assert.equal(config.baseUrl, undefined);

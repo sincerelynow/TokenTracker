@@ -29,7 +29,7 @@ async function makeTrackerDir() {
 // real; individual tests layer opt-out flags on top.
 const BASE_ENV = {
   TOKENTRACKER_INSFORGE_BASE_URL: "https://personal.example",
-  TOKENTRACKER_INSFORGE_ANON_KEY: "anon_telemetry_fixture",
+  TOKENTRACKER_INSFORGE_ANON_KEY: "anon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 };
 
 function fakeFetch(responses) {

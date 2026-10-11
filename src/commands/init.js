@@ -13,6 +13,7 @@ const {
   chmod600IfPossible,
 } = require("../lib/fs");
 const { resolveMimoNativeDbPath } = require("../lib/install-resolver");
+const { expandHome } = require("../lib/scan-roots");
 const { prompt, promptHidden } = require("../lib/prompt");
 const {
   upsertCodexNotify,
@@ -79,7 +80,8 @@ const {
   resolveReasonixHome,
   resolveTraeStoragePath,
 } = require("../lib/rollout");
-const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
+const { resolveRuntimeConfig, DEFAULT_BASE_URL, normalizeInstanceBaseUrl, assertInsforgeRuntime,
+  clearDeviceIdentity, resetInstanceState } = require("../lib/runtime-config");
 const {
   BOLD,
   DIM,
@@ -129,6 +131,7 @@ const SUPPORTED_PROVIDERS = [
   "Kimi Code",
   "CodeBuddy",
   "WorkBuddy",
+  "WorkBuddy AI",
   "Grok Build",
   "oh-my-pi",
   "OmO",
@@ -159,9 +162,10 @@ const SUPPORTED_PROVIDERS = [
   "Command Code",
 ];
 
-async function cmdInit(argv) {
+async function cmdInit(argv, options = {}) {
   const opts = parseArgs(argv);
-  const home = os.homedir();
+  const home = options.home || os.homedir();
+  if (opts.anonKeyFile) opts.anonKey = (await fs.readFile(opts.anonKeyFile, "utf8")).trim();
 
   const { rootDir, trackerDir, binDir } = await resolveTrackerPaths({ home });
 
@@ -171,10 +175,12 @@ async function cmdInit(argv) {
 
   const existingConfig = await readJson(configPath);
   const runtime = resolveRuntimeConfig({
-    cli: { baseUrl: opts.baseUrl, dashboardUrl: opts.dashboardUrl },
+    cli: { baseUrl: opts.baseUrl, dashboardUrl: opts.dashboardUrl, anonKey: opts.anonKey },
     config: existingConfig || {},
     env: process.env,
   });
+  // Local collection works without a Cloud destination; configured pairs still fail closed.
+  if (runtime.baseUrl || runtime.anonKey || opts.anonKey || existingConfig?.anonKey || process.env.TOKENTRACKER_INSFORGE_ANON_KEY) assertInsforgeRuntime(runtime);
   const notifyPath = path.join(binDir, "notify.cjs");
   const appDir = path.join(trackerDir, "app");
   const trackerBinPath = path.join(appDir, "bin", "tracker.js");
@@ -372,8 +378,16 @@ async function runSetup({
     existingConfig && typeof existingConfig === "object" && !Array.isArray(existingConfig)
       ? existingConfig
       : {};
+  const previousRuntime = resolveRuntimeConfig({ config: existingPlainConfig, env: {} });
+  const legacyMigrationPending = require("../lib/runtime-config").isLegacyInsforgeBaseUrl(existingPlainConfig.baseUrl) && !opts.baseUrl;
+  const changedInstance = !legacyMigrationPending && (normalizeInstanceBaseUrl(previousRuntime.baseUrl) !== runtime.baseUrl ||
+    previousRuntime.anonKey !== runtime.anonKey);
+  if (changedInstance) {
+    resetInstanceState(trackerDir);
+    deviceToken = null; deviceId = null;
+  }
   const config = {
-    ...existingPlainConfig,
+    ...(changedInstance ? clearDeviceIdentity(existingPlainConfig) : existingPlainConfig),
     installedAt,
     // Keep a persisted legacy URL until the first sync. sync owns the migration
     // lock and must reset the upload offset/backoff before removing this marker;
@@ -382,8 +396,13 @@ async function runSetup({
     // environment, or an explicitly persisted personal instance.
     baseUrl: opts.baseUrl || existingPlainConfig.baseUrl || undefined,
   };
-  if (opts.dashboardUrl) {
-    config.dashboardUrl = opts.dashboardUrl;
+  if (changedInstance || opts.dashboardUrl) {
+    config.dashboardUrl = runtime.dashboardUrl;
+  }
+  if (changedInstance || opts.anonKey || runtime.sources.anonKey === "env") config.anonKey = runtime.anonKey;
+  if (!legacyMigrationPending && runtime.baseUrl && runtime.baseUrl !== DEFAULT_BASE_URL) {
+    config.baseUrl = runtime.baseUrl;
+    config.dashboardUrl = runtime.dashboardUrl;
   }
 
   await writeJson(configPath, config);
@@ -566,6 +585,10 @@ async function repairRuntimeIntegrations({
       settingsPath: context.workbuddySettingsPath,
       hookCommand: context.workbuddyHookCommand,
     })],
+    ["workbuddy-ai", context.workbuddyAiDir, () => upsertClaudeHook({
+      settingsPath: context.workbuddyAiSettingsPath,
+      hookCommand: context.workbuddyAiHookCommand,
+    })],
   ];
   for (const [key, configDir, repair] of hookRepairs) {
     if (await isDir(configDir)) await attempt(key, repair);
@@ -610,6 +633,12 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   const workbuddyDir = process.env.WORKBUDDY_HOME || path.join(home, ".workbuddy");
   const workbuddySettingsPath = path.join(workbuddyDir, "settings.json");
   const workbuddyHookCommand = buildHookCommand(notifyPath, "workbuddy");
+  // WorkBuddy AI is the international build of the very same CLI. It keeps its
+  // data in a sibling home (~/.workbuddy-ai), so it needs its own hook install
+  // and its own --source token to be attributed separately from the CN build.
+  const workbuddyAiDir = expandHome(process.env.WORKBUDDY_AI_HOME, home) || path.join(home, ".workbuddy-ai");
+  const workbuddyAiSettingsPath = path.join(workbuddyAiDir, "settings.json");
+  const workbuddyAiHookCommand = buildHookCommand(notifyPath, "workbuddy-ai");
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const geminiHookCommand = buildGeminiHookCommand(notifyPath);
@@ -635,6 +664,9 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
     workbuddyDir,
     workbuddySettingsPath,
     workbuddyHookCommand,
+    workbuddyAiDir,
+    workbuddyAiSettingsPath,
+    workbuddyAiHookCommand,
     geminiConfigDir,
     geminiSettingsPath,
     geminiHookCommand,
@@ -1022,6 +1054,18 @@ async function applyIntegrationSetup({
     summary.push({ label: "WorkBuddy", status: "skipped", detail: "Config not found" });
   }
 
+  // WorkBuddy AI: international build, same hook schema, sibling home.
+  const workbuddyAiDirExists = await isDir(context.workbuddyAiDir);
+  if (workbuddyAiDirExists) {
+    await upsertClaudeHook({
+      settingsPath: context.workbuddyAiSettingsPath,
+      hookCommand: context.workbuddyAiHookCommand,
+    });
+    summary.push({ label: "WorkBuddy AI", status: "installed", detail: "Hooks installed" });
+  } else {
+    summary.push({ label: "WorkBuddy AI", status: "skipped", detail: "Config not found" });
+  }
+
   const openclawBefore = await probeOpenclawSessionPluginState({
     home,
     trackerDir,
@@ -1173,6 +1217,21 @@ async function previewIntegrations({ context }) {
     });
   } else {
     summary.push({ label: "WorkBuddy", status: "skipped", detail: "Config not found" });
+  }
+
+  const workbuddyAiDirExists = await isDir(context.workbuddyAiDir);
+  if (workbuddyAiDirExists) {
+    const configured = await isClaudeHookConfigured({
+      settingsPath: context.workbuddyAiSettingsPath,
+      hookCommand: context.workbuddyAiHookCommand,
+    });
+    summary.push({
+      label: "WorkBuddy AI",
+      status: "installed",
+      detail: configured ? "Hooks already installed" : "Will install hooks",
+    });
+  } else {
+    summary.push({ label: "WorkBuddy AI", status: "skipped", detail: "Config not found" });
   }
 
   const geminiConfigExists = await isDir(context.geminiConfigDir);
@@ -1336,6 +1395,8 @@ function parseArgs(argv) {
   const out = {
     baseUrl: null,
     dashboardUrl: null,
+    anonKey: null,
+    anonKeyFile: null,
     email: null,
     password: null,
     deviceName: null,
@@ -1350,6 +1411,8 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--base-url") out.baseUrl = argv[++i] || null;
     else if (a === "--dashboard-url") out.dashboardUrl = argv[++i] || null;
+    else if (a === "--anon-key") out.anonKey = argv[++i] || null;
+    else if (a === "--anon-key-file") out.anonKeyFile = argv[++i] || null;
     else if (a === "--email") out.email = argv[++i] || null;
     else if (a === "--password") out.password = argv[++i] || null;
     else if (a === "--device-name") out.deviceName = argv[++i] || null;
@@ -1475,7 +1538,7 @@ try {
       ? codeOriginalPath
       : source === 'acode'
         ? acodeOriginalPath
-        : source === 'claude' || source === 'opencode' || source === 'gemini' || source === 'codebuddy' || source === 'workbuddy'
+        : source === 'claude' || source === 'opencode' || source === 'gemini' || source === 'codebuddy' || source === 'workbuddy' || source === 'workbuddy-ai'
           ? null
           : codexOriginalPath;
   if (originalPath) {

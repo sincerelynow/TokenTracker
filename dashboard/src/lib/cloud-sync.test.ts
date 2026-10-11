@@ -1,368 +1,197 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  CLOUD_LEADERBOARD_REFRESHED_EVENT,
-  clearCloudDeviceSession,
-  getCloudUsageReady,
-  setCloudUsageReady,
-} from "./cloud-sync-prefs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearCloudDeviceSession, getCloudUsageReady, getStoredDeviceSession, setCloudUsageReady, setStoredDeviceSession, setCloudSyncEnabled, setLastCloudSyncTs, getLastCloudSyncTs } from "./cloud-sync-prefs";
 import { runCloudUsageSyncIfDue, runCloudUsageSyncNow } from "./cloud-sync";
-
 const cloudTarget = vi.hoisted(() => ({ baseUrl: "https://cloud.example" }));
-
-vi.mock("./insforge-config", () => ({
-  getInsforgeAnonKey: () => "anon-key",
-  getInsforgeRemoteUrl: () => cloudTarget.baseUrl,
-}));
-
-vi.mock("./local-api-auth", () => ({
-  getLocalApiAuthHeaders: async () => ({ "x-tokentracker-local-auth": "local-token" }),
-}));
-
-function okJson(data: unknown): Response {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => data,
-  } as Response;
-}
-
-function installFetchMock(options: { leaderboardOk?: boolean } = {}) {
-  const leaderboardOk = options.leaderboardOk ?? true;
-  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
-    if (url === "/functions/tokentracker-cloud-sync-pref") return okJson({ ok: true });
-    if (url === "/functions/tokentracker-machine-id") {
-      return okJson({ machineId: "machine-abcdef12", deviceName: "office-win" });
-    }
-    if (url === `${cloudTarget.baseUrl}/functions/tokentracker-device-token-issue`) {
-      return okJson({
-        token: "device-token",
-        device_id: "device-id",
-        created_at: new Date().toISOString(),
-      });
-    }
-    if (url === "/functions/tokentracker-local-sync") {
-      return okJson({ ok: true });
-    }
-    if (url === `${cloudTarget.baseUrl}/functions/tokentracker-leaderboard-refresh`) {
-      return {
-        ok: leaderboardOk,
-        status: leaderboardOk ? 200 : 403,
-        json: async () => ({ ok: leaderboardOk }),
-      } as Response;
-    }
+vi.mock("./insforge-config", () => ({ getInsforgeRemoteUrl: () => cloudTarget.baseUrl, getInsforgeAnonKey: () => "public-key" }));
+vi.mock("./local-api-auth", () => ({ getLocalApiAuthHeaders: async () => ({ "x-tokentracker-local-auth": "local-token" }) }));
+const ownerJwt = (owner: string, nonce = 1) => `e30.${btoa(JSON.stringify({ sub: owner, nonce }))}.sig`;
+const response = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => data }) as Response;
+const issued = (id = "local-session") => response({ session_id: id, device_id: "device-id", created_at: new Date().toISOString() });
+function setupFetch(syncResult: unknown = { ok: true, uploaded: true }) {
+  const mock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/functions/tokentracker-cloud-sync-pref") return response({ ok: true });
+    if (url === "/functions/tokentracker-cloud-session") return JSON.parse(String(init?.body)).clear ? response({ ok: true }) : issued();
+    if (url === "/functions/tokentracker-local-sync") return response(syncResult);
     throw new Error(`Unexpected fetch: ${url}`);
   });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
+  vi.stubGlobal("fetch", mock);
+  return mock;
 }
+function uploads(mock: ReturnType<typeof vi.fn>) { return mock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync"); }
+function bridges(mock: ReturnType<typeof vi.fn>) { return mock.mock.calls.filter(([url, init]) => url === "/functions/tokentracker-cloud-session" && !JSON.parse(String(init?.body)).clear); }
+function uploadBody(mock: ReturnType<typeof vi.fn>) { return JSON.parse(String(uploads(mock)[0]?.[1]?.body)); }
+beforeEach(() => { vi.unstubAllGlobals(); localStorage.clear(); localStorage.setItem("tokentracker_cloud_sync_enabled", "1"); clearCloudDeviceSession(); });
 
-function getLocalSyncBody(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
-  const call = fetchMock.mock.calls.find(([url]) => url === "/functions/tokentracker-local-sync");
-  expect(call).toBeTruthy();
-  const init = call?.[1] as RequestInit | undefined;
-  expect(init?.method).toBe("POST");
-  return JSON.parse(String(init?.body));
-}
-
-function installLocalStorageMock() {
-  const store = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      store.set(key, String(value));
-    },
-    removeItem: (key: string) => {
-      store.delete(key);
-    },
-    clear: () => {
-      store.clear();
-    },
+describe("Cloud local bridge", () => {
+  it("mirrors the saved opt-in before creating a local session or uploading", async () => {
+    const mock = setupFetch();
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
+    expect(mock.mock.calls[0][0]).toBe("/functions/tokentracker-cloud-sync-pref");
+    expect(JSON.parse(String(mock.mock.calls[0][1]?.body))).toMatchObject({ enabled: true });
+    expect(bridges(mock)).toHaveLength(1);
+    expect(uploads(mock)).toHaveLength(1);
   });
-}
-
-describe("cloud usage sync", () => {
-  beforeEach(() => {
-    cloudTarget.baseUrl = "https://cloud.example";
-    vi.unstubAllGlobals();
-    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
-    installLocalStorageMock();
-    localStorage.setItem("tokentracker_cloud_sync_enabled", "1");
-    clearCloudDeviceSession();
+  it.each(["0", null])("does not create a session or upload without explicit opt-in %s", async (preference) => {
+    if (preference === null) localStorage.removeItem("tokentracker_cloud_sync_enabled");
+    else localStorage.setItem("tokentracker_cloud_sync_enabled", preference);
+    const mock = setupFetch();
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    expect(bridges(mock)).toHaveLength(0);
+    expect(uploads(mock)).toHaveLength(0);
   });
-
-  it("sends drain for manual sync", async () => {
-    const fetchMock = installFetchMock();
-    const onSynced = vi.fn();
-    window.addEventListener("tt.cloudUsageSynced", onSynced);
-
-    await runCloudUsageSyncNow(async () => "access-token");
-
-    expect(getLocalSyncBody(fetchMock)).toMatchObject({
-      deviceToken: "device-token",
-      drain: true,
-      insforgeBaseUrl: "https://cloud.example",
-    });
-    expect(onSynced).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.find(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")?.[1])
-      .toMatchObject({ cache: "no-store" });
-    window.removeEventListener("tt.cloudUsageSynced", onSynced);
-  });
-
-  it("sends the local system name separately from the stable machine id", async () => {
-    const fetchMock = installFetchMock();
-
-    await runCloudUsageSyncNow(async () => "access-token");
-
-    const issueCall = fetchMock.mock.calls.find(([url]) => url === "https://cloud.example/functions/tokentracker-device-token-issue");
-    expect(issueCall).toBeTruthy();
-    const issueBody = JSON.parse(String((issueCall?.[1] as RequestInit | undefined)?.body));
-    expect(issueBody).toMatchObject({
-      device_name: "office-win",
-      machine_id: "machine-abcdef12",
-    });
-  });
-
-  it("drains the full queue before the first scheduled cloud view becomes ready", async () => {
-    const fetchMock = installFetchMock();
-    const onSynced = vi.fn();
-    const onLeaderboardRefresh = vi.fn();
-    window.addEventListener("tt.cloudUsageSynced", onSynced);
-    window.addEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
-
-    await runCloudUsageSyncIfDue(async () => "access-token");
-
-    expect(getLocalSyncBody(fetchMock)).toEqual({
-      deviceToken: "device-token",
-      drain: true,
-      insforgeBaseUrl: "https://cloud.example",
-    });
-    expect(onSynced).toHaveBeenCalledTimes(1);
-    expect(onLeaderboardRefresh).toHaveBeenCalledTimes(1);
+  it("proves the current JWT through the local bridge and posts only its owned session handle", async () => {
+    const mock = setupFetch();
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
+    expect(bridges(mock)).toHaveLength(1);
+    expect(bridges(mock)[0][1]?.headers).toMatchObject({ Authorization: `Bearer ${ownerJwt("user-a")}`, "x-tokentracker-local-auth": "local-token" });
+    expect(JSON.parse(String(bridges(mock)[0][1]?.body))).toEqual({ expectedOwnerId: "user-a", insforgeBaseUrl: "https://cloud.example" });
+    expect(uploadBody(mock)).toEqual({ cloudSessionId: "local-session", expectedOwnerId: "user-a", insforgeBaseUrl: "https://cloud.example", drain: true, recheckCloudAccess: true });
+    expect(uploadBody(mock).deviceToken).toBeUndefined();
     expect(getCloudUsageReady()).toBe(true);
+    expect(mock.mock.calls.some(([url]) => String(url).includes("leaderboard-refresh"))).toBe(false);
+  });
+  it("drains the first automatic upload and marks later uploads as automatic", async () => {
+    const mock = setupFetch();
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    expect(uploadBody(mock)).toMatchObject({ drain: true, auto: true });
+    expect(uploadBody(mock).recheckCloudAccess).toBeUndefined();
+    setLastCloudSyncTs(0);
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    expect(JSON.parse(String(uploads(mock)[1][1]?.body))).toEqual({ cloudSessionId: "local-session", expectedOwnerId: "user-a", insforgeBaseUrl: "https://cloud.example", auto: true });
+  });
+  it("suppresses automatic uploads for fifteen minutes while manual sync may recheck", async () => {
+    const mock = setupFetch();
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    expect(uploads(mock)).toHaveLength(1);
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
+    expect(uploads(mock)).toHaveLength(2);
+  });
+  it("honors the server's longer deadline and does not announce success for an unchanged queue", async () => {
+    const mock = setupFetch({ ok: true, uploaded: false, pending: true, next_allowed_at: new Date(Date.now() + 86400_000).toISOString() });
+    const onSynced = vi.fn(); window.addEventListener("tt.cloudUsageSynced", onSynced);
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a"));
+    expect(uploads(mock)).toHaveLength(1); expect(onSynced).not.toHaveBeenCalled(); expect(getCloudUsageReady()).toBe(false);
     window.removeEventListener("tt.cloudUsageSynced", onSynced);
-    window.removeEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
   });
-
-  it("does not announce a leaderboard refresh when the refresh endpoint fails", async () => {
-    installFetchMock({ leaderboardOk: false });
-    const onLeaderboardRefresh = vi.fn();
-    window.addEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
-
-    await runCloudUsageSyncNow(async () => "access-token");
-
-    expect(onLeaderboardRefresh).not.toHaveBeenCalled();
-    window.removeEventListener(CLOUD_LEADERBOARD_REFRESHED_EVENT, onLeaderboardRefresh);
+  it("keeps a daily denial deadline even before the first upload is ready", async () => {
+    const mock = vi.fn(async (url: string) => url.endsWith("cloud-session") ? issued() : response({ code: "cloud_sync_throttled", next_allowed_at: new Date(Date.now() + 86400_000).toISOString() }, 429));
+    vi.stubGlobal("fetch", mock);
+    await expect(runCloudUsageSyncIfDue(async () => ownerJwt("user-a"))).rejects.toMatchObject({ status: 429, code: "cloud_sync_throttled" });
+    await runCloudUsageSyncIfDue(async () => ownerJwt("user-a")); expect(uploads(mock)).toHaveLength(1);
   });
-
-  it("keeps personal upload enabled but skips leaderboard refresh when community features are disabled", async () => {
-    vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "false");
-    const fetchMock = installFetchMock();
-
-    await runCloudUsageSyncNow(async () => "access-token");
-
-    expect(getLocalSyncBody(fetchMock)).toMatchObject({
-      deviceToken: "device-token",
-      drain: true,
-      insforgeBaseUrl: "https://cloud.example",
-    });
-    expect(fetchMock.mock.calls.some(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")).toBe(false);
-    vi.unstubAllEnvs();
+  it("shares owner proof for concurrent requests and retains it through JWT rotation", async () => {
+    const mock = setupFetch();
+    await Promise.all([runCloudUsageSyncNow(async () => ownerJwt("user-a")), runCloudUsageSyncNow(async () => ownerJwt("user-a"))]);
+    expect(bridges(mock)).toHaveLength(1);
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a", 2)); expect(bridges(mock)).toHaveLength(1);
   });
-
-  it("keeps personal upload enabled and skips leaderboard refresh by default", async () => {
-    vi.unstubAllEnvs();
-    const fetchMock = installFetchMock();
-
-    await runCloudUsageSyncNow(async () => "access-token");
-
-    expect(getLocalSyncBody(fetchMock)).toMatchObject({
-      deviceToken: "device-token",
-      drain: true,
-      insforgeBaseUrl: "https://cloud.example",
-    });
-    expect(fetchMock.mock.calls.some(([url]) => url === "https://cloud.example/functions/tokentracker-leaderboard-refresh")).toBe(false);
+  it("drops a delayed bridge after logout without posting the old account handle", async () => {
+    let token = ownerJwt("user-a"); let release!: (r: Response) => void; let started!: () => void;
+    const seen = new Promise<void>(r => { started = r; }); const pending = new Promise<Response>(r => { release = r; }); let count = 0;
+    const mock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("cloud-session")) { if (JSON.parse(String(init?.body)).clear) return response({ ok: true }); count += 1; if (count === 1) { started(); return pending; } return issued("session-b"); }
+      return response({ ok: true, uploaded: true });
+    }); vi.stubGlobal("fetch", mock);
+    const old = runCloudUsageSyncNow(async () => token); await seen; clearCloudDeviceSession(); token = ownerJwt("user-b"); release(issued("session-a")); await old;
+    expect(uploads(mock)).toHaveLength(0); await runCloudUsageSyncNow(async () => token);
+    expect(uploadBody(mock).cloudSessionId).toBe("session-b"); expect(getStoredDeviceSession()?.ownerId).toBe("user-b");
   });
-
-  it("keeps scheduled sync lightweight after cloud usage is ready", async () => {
-    setCloudUsageReady(true);
-    const fetchMock = installFetchMock();
-
-    await runCloudUsageSyncIfDue(async () => "access-token");
-
-    expect(getLocalSyncBody(fetchMock)).toEqual({
-      deviceToken: "device-token",
-      insforgeBaseUrl: "https://cloud.example",
-    });
+  it("cloud sync off cancels pending owner proof before any upload", async () => {
+    let release!: (r: Response) => void; let started!: () => void; const seen = new Promise<void>(r => { started = r; }); const pending = new Promise<Response>(r => { release = r; });
+    const mock = vi.fn(async (url: string) => { if (url.endsWith("cloud-session")) { started(); return pending; } return response({ ok: true }); }); vi.stubGlobal("fetch", mock);
+    const old = runCloudUsageSyncNow(async () => ownerJwt("user-a")); await seen; setCloudSyncEnabled(false); release(issued()); await old;
+    expect(uploads(mock)).toHaveLength(0); expect(getStoredDeviceSession()).toBeNull();
   });
-
-  it("issues a new device session and syncs when the account changes on one URL", async () => {
-    const fetchMock = installFetchMock();
-    await runCloudUsageSyncNow(async () => "test-access", "test-user");
-    await runCloudUsageSyncIfDue(async () => "formal-access", "formal-user");
-    const issueCalls = fetchMock.mock.calls.filter(([url]) => url === "https://cloud.example/functions/tokentracker-device-token-issue");
-    const syncCalls = fetchMock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync");
-    expect(issueCalls).toHaveLength(2);
-    expect(syncCalls).toHaveLength(2);
-    expect(JSON.parse(String((syncCalls[0][1] as RequestInit).body))).toMatchObject({ accountId: "test-user" });
-    expect(JSON.parse(String((syncCalls[1][1] as RequestInit).body))).toMatchObject({ accountId: "formal-user", drain: true });
-  });
-});
-
-function ownerJwt(owner: string, nonce = 1) {
-  const encode = (value: unknown) => btoa(JSON.stringify(value)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-  return `${encode({ alg: "HS256" })}.${encode({ sub: owner, nonce })}.signature`;
-}
-
-describe("cloud device session ownership", () => {
-  beforeEach(() => {
-    cloudTarget.baseUrl = "https://cloud.example";
-    vi.unstubAllGlobals();
-    installLocalStorageMock();
-    localStorage.setItem("tokentracker_cloud_sync_enabled", "1");
-    clearCloudDeviceSession();
-  });
-
-  it("issues a destination-bound credential when the same owner switches personal instances", async () => {
-    const fetchMock = installFetchMock();
-    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
-    cloudTarget.baseUrl = "https://second.example";
-    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
-    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("tokentracker-device-token-issue")).map(([url]) => url))
-      .toEqual([
-        "https://cloud.example/functions/tokentracker-device-token-issue",
-        "https://second.example/functions/tokentracker-device-token-issue",
-      ]);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync")
-      .map(([, init]) => JSON.parse(String(init?.body)).insforgeBaseUrl))
-      .toEqual(["https://cloud.example", "https://second.example"]);
-  });
-
-  it("discards delayed issuance if the personal instance changes before completion", async () => {
-    let release!: (value: Response) => void;
-    let started!: () => void;
-    const issued = new Promise<void>((resolve) => { started = resolve; });
-    const pending = new Promise<Response>((resolve) => { release = resolve; });
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === "/functions/tokentracker-machine-id") return okJson({ machineId: "machine-12345678" });
-      if (url.endsWith("tokentracker-device-token-issue")) { started(); return pending; }
-      return okJson({ ok: true });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const sync = runCloudUsageSyncNow(async () => ownerJwt("user-a"));
-    await issued;
-    cloudTarget.baseUrl = "https://second.example";
-    release(okJson({ token: "old-instance-token", device_id: "old-instance-device", created_at: new Date().toISOString() }));
-    await sync;
-    expect(fetchMock.mock.calls.some(([url]) => url === "/functions/tokentracker-local-sync")).toBe(false);
-    const { getStoredDeviceSession } = await import("./cloud-sync-prefs");
-    expect(getStoredDeviceSession()).toBeNull();
-  });
-
-  it("drops delayed issuance after sign-out and issues the new owner's token", async () => {
-    let accessToken = ownerJwt("user-a");
-    let release!: (value: Response) => void;
-    let started!: () => void;
-    const issued = new Promise<void>((resolve) => { started = resolve; });
-    const pending = new Promise<Response>((resolve) => { release = resolve; });
-    const postTokens: string[] = [];
-    let issues = 0;
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/functions/tokentracker-machine-id") return okJson({ machineId: "machine-12345678" });
-      if (url.endsWith("tokentracker-device-token-issue")) {
-        issues += 1;
-        if (issues === 1) { started(); return pending; }
-        return okJson({ token: "token-b", device_id: "device-b", created_at: new Date().toISOString() });
-      }
-      if (url === "/functions/tokentracker-local-sync") {
-        postTokens.push(JSON.parse(String(init?.body)).deviceToken);
-        return okJson({ ok: true });
-      }
-      return okJson({ ok: true });
-    }));
-    const old = runCloudUsageSyncNow(async () => accessToken);
-    await issued;
-    clearCloudDeviceSession();
-    accessToken = ownerJwt("user-b");
-    release(okJson({ token: "token-a", device_id: "device-a", created_at: new Date().toISOString() }));
-    await old;
-    expect(postTokens).toEqual([]);
-    await runCloudUsageSyncNow(async () => accessToken);
-    expect(issues).toBe(2);
-    expect(postTokens).toEqual(["token-b"]);
-  });
-
-  it("shares issuance for concurrent sync requests of one owner and epoch", async () => {
-    const fetchMock = installFetchMock();
-    await Promise.all([
-      runCloudUsageSyncNow(async () => ownerJwt("user-a")),
-      runCloudUsageSyncNow(async () => ownerJwt("user-a")),
-    ]);
-    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("tokentracker-device-token-issue"))).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync")).toHaveLength(2);
-  });
-
-  it("keeps the device credential when an access token rotates for the same owner", async () => {
-    const fetchMock = installFetchMock();
-    let accessToken = ownerJwt("user-a");
-    await runCloudUsageSyncNow(async () => accessToken);
-    accessToken = ownerJwt("user-a", 2);
-    await runCloudUsageSyncNow(async () => accessToken);
-    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith("tokentracker-device-token-issue"))).toHaveLength(1);
-  });
-
-  it("turning cloud sync off cancels pending issuance before any upload", async () => {
-    const { setCloudSyncEnabled, getStoredDeviceSession } = await import("./cloud-sync-prefs");
-    let release!: (value: Response) => void;
-    let started!: () => void;
-    const issued = new Promise<void>((resolve) => { started = resolve; });
-    const pending = new Promise<Response>((resolve) => { release = resolve; });
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === "/functions/tokentracker-machine-id") return okJson({ machineId: "machine-12345678" });
-      if (url.endsWith("tokentracker-device-token-issue")) { started(); return pending; }
-      return okJson({ ok: true });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const old = runCloudUsageSyncNow(async () => ownerJwt("user-a"));
-    await issued;
-    setCloudSyncEnabled(false);
-    release(okJson({ token: "token-a", device_id: "device-a", created_at: new Date().toISOString() }));
-    await old;
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync")).toHaveLength(0);
-    expect(getStoredDeviceSession()).toBeNull();
-  });
-
-  for (const code of ["CLOUD_UPLOAD_FAILED", "SYNC_BUSY", "SYNC_UPLOAD_BACKOFF", "CLOUD_UPLOAD_FORBIDDEN"]) {
-    it(`retains an existing credential on ${code}`, async () => {
-      const { setStoredDeviceSession, getStoredDeviceSession } = await import("./cloud-sync-prefs");
-      setStoredDeviceSession({ token: "previous-valid-token", deviceId: "device-a", issuedAt: new Date().toISOString(), ownerId: "user-a", baseUrl: "https://cloud.example" });
-      const fetchMock = vi.fn(async (_url: string) => ({ ok: false, status: code === "CLOUD_UPLOAD_FORBIDDEN" ? 403 : 503, json: async () => ({ error: "temporary or policy failure", code }) }) as Response);
-      vi.stubGlobal("fetch", fetchMock);
+  for (const code of ["CLOUD_UPLOAD_FAILED", "SYNC_BUSY", "SYNC_UPLOAD_BACKOFF", "CLOUD_UPLOAD_FORBIDDEN", "cloud_machine_paused", "cloud_membership_required"]) {
+    it(`keeps the account binding and local readiness on ${code}`, async () => {
+      setStoredDeviceSession({ localSessionId: "existing-handle", deviceId: "device-id", issuedAt: new Date().toISOString(), ownerId: "user-a", baseUrl: "https://cloud.example" }); setCloudUsageReady(true);
+      const mock = vi.fn(async () => response({ error: "temporary or policy failure", code }, 403)); vi.stubGlobal("fetch", mock);
       await expect(runCloudUsageSyncNow(async () => ownerJwt("user-a"))).rejects.toMatchObject({ code });
-      expect(fetchMock.mock.calls.filter(([url]) => url === "/functions/tokentracker-local-sync")).toHaveLength(1);
-      expect(getStoredDeviceSession()?.token).toBe("previous-valid-token");
+      expect(getStoredDeviceSession()?.localSessionId).toBe("existing-handle"); expect(getCloudUsageReady()).toBe(true); expect(bridges(mock)).toHaveLength(0);
     });
   }
-
-  it("reissues only an explicitly rejected device credential", async () => {
-    const { setStoredDeviceSession } = await import("./cloud-sync-prefs");
-    setStoredDeviceSession({ token: "revoked-token", deviceId: "device-a", issuedAt: new Date().toISOString(), ownerId: "user-a", baseUrl: "https://cloud.example" });
-    const posted: string[] = [];
-    let issues = 0;
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/functions/tokentracker-machine-id") return okJson({ machineId: "machine-12345678" });
-      if (url.endsWith("tokentracker-device-token-issue")) {
-        issues += 1;
-        return okJson({ token: "fresh-token", device_id: "device-a", created_at: new Date().toISOString() });
-      }
-      if (url === "/functions/tokentracker-local-sync") {
-        const token = JSON.parse(String(init?.body)).deviceToken;
-        posted.push(token);
-        if (token === "revoked-token") return { ok: false, status: 401, json: async () => ({ error: "Unauthorized", code: "CLOUD_DEVICE_TOKEN_REJECTED" }) } as Response;
-      }
-      return okJson({ ok: true });
-    }));
-    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
-    expect(issues).toBe(1);
-    expect(posted).toEqual(["revoked-token", "fresh-token"]);
+  it("proves ownership again after the server invalidates a stale handle", async () => {
+    setStoredDeviceSession({ localSessionId: "stale-handle", deviceId: "device-id", issuedAt: new Date().toISOString(), ownerId: "user-a", baseUrl: "https://cloud.example" });
+    const mock = vi.fn(async (url: string, init?: RequestInit) => { if (url.endsWith("cloud-session")) return issued("fresh-handle"); const body = JSON.parse(String(init?.body)); return body.cloudSessionId === "stale-handle" ? response({ code: "auth_session_changed" }, 409) : response({ ok: true, uploaded: true }); }); vi.stubGlobal("fetch", mock);
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a")); expect(bridges(mock)).toHaveLength(1);
+    expect(uploads(mock).map(call => JSON.parse(String(call[1]?.body)).cloudSessionId)).toEqual(["stale-handle", "fresh-handle"]);
   });
+  it("malformed JWTs cannot fall back to another local account", async () => { const mock = setupFetch(); await runCloudUsageSyncNow(async () => "not-a-jwt"); expect(bridges(mock)).toHaveLength(0); expect(uploads(mock)).toHaveLength(0); });
+  it("an empty successful manual drain cannot announce initial Cloud readiness", async () => {
+    const mock = setupFetch({ ok: true, uploaded: false, pending: false });
+    const onSynced = vi.fn(); window.addEventListener("tt.cloudUsageSynced", onSynced);
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"));
+    expect(uploads(mock)).toHaveLength(1); expect(getCloudUsageReady()).toBe(false);
+    expect(onSynced).not.toHaveBeenCalled(); expect(getLastCloudSyncTs()).toBe(0);
+    window.removeEventListener("tt.cloudUsageSynced", onSynced);
+  });
+
+});
+
+beforeEach(() => { cloudTarget.baseUrl = "https://cloud.example"; vi.unstubAllEnvs(); });
+afterEach(() => vi.unstubAllEnvs());
+
+it.each([undefined, "false"])("uploads personal usage without community work when the flag is %s", async flag => {
+  if (flag !== undefined) vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", flag);
+  const mock = setupFetch();
+  await runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-a");
+  expect(uploads(mock)).toHaveLength(1);
+  expect(getStoredDeviceSession()).toMatchObject({ accountId: "user-a", ownerId: "user-a", baseUrl: "https://cloud.example" });
+  expect(mock.mock.calls.some(([url]) => String(url).includes("leaderboard-refresh"))).toBe(false);
+});
+it("refreshes the community only after a confirmed complete upload when explicitly enabled", async () => {
+  vi.stubEnv("VITE_TOKENTRACKER_ENABLE_COMMUNITY_FEATURES", "true");
+  const mock = setupFetch();
+  mock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("leaderboard-refresh")) return response({ ok: true });
+    if (url.endsWith("cloud-session")) return JSON.parse(String(init?.body)).clear ? response({ ok: true }) : issued();
+    return response({ ok: true, uploaded: true });
+  });
+  const changed = vi.fn(); window.addEventListener("tt.cloudLeaderboardRefreshed", changed);
+  try {
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-a");
+    expect(mock.mock.calls.filter(([url]) => String(url).endsWith("leaderboard-refresh"))).toHaveLength(1);
+    expect(changed).toHaveBeenCalledTimes(1);
+    mock.mockClear(); mock.mockImplementation(async (url: string) => url.endsWith("cloud-session") ? issued() : response({ ok: true, uploaded: false, pending: true }));
+    await runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-a");
+    expect(mock.mock.calls.some(([url]) => String(url).endsWith("leaderboard-refresh"))).toBe(false);
+  } finally { window.removeEventListener("tt.cloudLeaderboardRefreshed", changed); }
+});
+it("invalidates a delayed local bridge when the backend target changes", async () => {
+  let release!: (r: Response) => void; let arrived!: () => void;
+  const pending = new Promise<Response>(r => { release = r; }); const seen = new Promise<void>(r => { arrived = r; });
+  const mock = setupFetch(); mock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("cloud-session")) {
+      if (JSON.parse(String(init?.body)).clear) return response({ ok: true });
+      arrived(); return pending;
+    }
+    return response({ ok: true });
+  });
+  const old = runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-a"); await seen;
+  cloudTarget.baseUrl = "https://other.example"; release(issued("old-instance")); await old;
+  expect(uploads(mock)).toHaveLength(0); expect(getStoredDeviceSession()).toBeNull();
+  const next = setupFetch(); await runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-a");
+  expect(getStoredDeviceSession()?.baseUrl).toBe("https://other.example"); expect(uploads(next)).toHaveLength(1);
+});
+it("requires the supplied account to match the JWT before creating an upload binding", async () => {
+  const mock = setupFetch(); await runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-b");
+  expect(bridges(mock)).toHaveLength(0); expect(uploads(mock)).toHaveLength(0);
+});
+
+it("ignores a delayed cooldown response after the account session is cleared", async () => {
+  let release!: (r: Response) => void; let arrived!: () => void;
+  const pending = new Promise<Response>(r => { release = r; });
+  const seen = new Promise<void>(r => { arrived = r; });
+  const mock = setupFetch(); mock.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("cloud-session")) return JSON.parse(String(init?.body)).clear ? response({ ok: true }) : issued();
+    if (url.endsWith("local-sync")) { arrived(); return pending; }
+    return response({ ok: true });
+  });
+  const old = runCloudUsageSyncNow(async () => ownerJwt("user-a"), "user-a"); await seen;
+  clearCloudDeviceSession(); setLastCloudSyncTs(123);
+  release(response({ code: "cloud_sync_throttled", next_allowed_at: new Date(Date.now() + 86400_000).toISOString() }, 429));
+  await old; expect(getLastCloudSyncTs()).toBe(123); expect(getStoredDeviceSession()).toBeNull();
 });

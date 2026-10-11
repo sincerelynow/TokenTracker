@@ -160,7 +160,7 @@ const {
   parseRetryAfterMs,
 } = require("../lib/upload-throttle");
 const AUTO_UPLOAD_CONFIG = {
-  intervalMs: 5 * 60_000,
+  intervalMs: 15 * 60_000,
   batchSize: 200,
   maxBatchesSmall: 5,
   maxBatchesLarge: 5,
@@ -358,6 +358,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "trae",
   "unsloth",
   "workbuddy",
+  "workbuddy-ai",
   "zcode",
   "zed",
 ]);
@@ -511,6 +512,7 @@ async function clearSyncSkip(trackerDir) {
 }
 
 async function cmdSync(argv, context = {}) {
+  context = context && typeof context === "object" ? context : {};
   const opts = parseArgs(argv);
   const diagnostics = context && typeof context === "object" ? context.diagnostics : null;
   const cursorStoreOptions = context && typeof context === "object"
@@ -532,8 +534,8 @@ async function cmdSync(argv, context = {}) {
     ? context.cursorSyncDeps
     : {};
   const syncDiagnostics = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
-  const home = os.homedir();
-  const { trackerDir } = await resolveTrackerPaths({ home });
+  const home = context.home || os.homedir();
+  const trackerDir = context.trackerDataDir || (await resolveTrackerPaths({ home })).trackerDir;
   // Manual CLI sync is a one-time upload request, without changing the toggle.
   // Hooks, native publication and detached retries must honor the saved opt-in.
   const requiresCloudSyncPref = opts.auto || opts.background || opts.fromRetry || opts.fromNotify || opts.fromOpenclaw ||
@@ -593,7 +595,8 @@ async function cmdSync(argv, context = {}) {
     // token unless the local API has already minted a replacement from the
     // user's current login session and passed it through the environment.
     // Ingest is a whole-row upsert per bucket key, making replay idempotent.
-    if (config && isLegacyInsforgeBaseUrl(config.baseUrl)) {
+    if (config && isLegacyInsforgeBaseUrl(config.baseUrl) &&
+        !Object.hasOwn(process.env, "TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN")) {
       const priorQueueState = (await readJson(queueStatePath)) || {};
       // Prepare the replay exactly once. The note survives successful batches,
       // so retryable failures retain both their committed offset and backoff
@@ -703,6 +706,7 @@ async function cmdSync(argv, context = {}) {
     const isBackgroundAllLocalSync = isBackgroundLightweightSync && opts.allLocalSources;
     const isFullSourceScan = !autoSourceScope && !isBackgroundLightweightSync;
     const sourceAllowed = (...sources) => {
+      if (Array.isArray(context.scanSources) && !sources.some(source => context.scanSources.includes(source))) return false;
       if (isBackgroundLightweightSync) {
         if (autoSourceScope) {
           return (
@@ -970,8 +974,9 @@ async function cmdSync(argv, context = {}) {
     // Plugin-triggered sync points at one specific session file; a normal full
     // sync also passively scans every on-disk OpenClaw transcript so usage is
     // captured even when the session plugin never fires (issue #264). The scan
-    // is gated to full syncs so a scoped `--from-openclaw` hook still only
-    // touches its own file and the 5-minute background tick stays cheap. The
+    // is gated to full syncs except for gateway lifecycle signals. A scoped
+    // agent_end reads only its transcript or its session in the agent database,
+    // and the ordinary background tick stays cheap. The
     // event-identity dedup makes the plugin and passive paths idempotent, so
     // overlap on the same file is safe.
     //
@@ -985,12 +990,22 @@ async function cmdSync(argv, context = {}) {
         path: openclawSignal.sessionFile,
         source: "openclaw",
       });
+      for (const dbPath of [
+        path.join(openclawSignal.openclawHome, "agents", openclawSignal.agentId, "agent", "openclaw-agent.sqlite"),
+        path.join(openclawSignal.openclawHome, "agents", openclawSignal.agentId, "openclaw-agent.sqlite"),
+      ]) {
+        if (!(await fs.stat(dbPath).catch(() => null))?.isFile()) continue;
+        openclawSessionFiles.set(openclawCursorKey(dbPath), {
+          path: dbPath, source: "openclaw", sessionId: openclawSignal.sessionId,
+        });
+        break;
+      }
     }
-    if (isFullSourceScan && sourceAllowed("openclaw")) {
+    if ((isFullSourceScan || (opts.fromOpenclaw && !openclawSignal)) && sourceAllowed("openclaw")) {
       try {
         for (const f of await resolveOpenclawSessionFiles(process.env)) {
           const key = openclawCursorKey(f);
-          if (!openclawSessionFiles.has(key)) {
+          if (!openclawSessionFiles.has(key) || f.endsWith(".sqlite")) {
             openclawSessionFiles.set(key, { path: f, source: "openclaw" });
           }
         }
@@ -2588,6 +2603,42 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
+    // ── WorkBuddy AI — international build (~/.workbuddy-ai/projects/**/*.jsonl) ──
+    // Same Claude-fork family and byte-identical JSONL as the CN build above;
+    // only the home directory differs, so it reuses the WorkBuddy parser and
+    // gets its own source key (and cursor namespace) so the two builds stay
+    // separable instead of merging into one provider row.
+    let workbuddyAiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const workbuddyAiFiles = sourceAllowed("workbuddy-ai")
+      ? mergeBothFileSources({
+          resolveFiles: (resolveEnv) => resolveWorkbuddyProjectFiles(resolveEnv, "workbuddy-ai"),
+          env: process.env,
+        })
+      : [];
+    if (sourceAllowed("workbuddy-ai")) {
+      if (progress?.enabled) {
+        progress.start(`Parsing WorkBuddy AI ${renderBar(0)} | buckets 0`);
+      }
+      try {
+        workbuddyAiResult = await parseWorkbuddyIncremental({
+          projectFiles: workbuddyAiFiles,
+          cursors,
+          queuePath,
+          env: process.env,
+          source: "workbuddy-ai",
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing WorkBuddy AI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+        });
+      } catch (err) {
+        warnProviderParseFailure("WorkBuddy AI", err, opts);
+      }
+    }
+
     // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
     // Task-subagent transcripts (nested below the cwd level) are scanned too,
     // so their usage counts toward the omp totals.
@@ -3247,6 +3298,7 @@ async function cmdSync(argv, context = {}) {
       kimiCodeResult.recordsProcessed +
       codebuddyResult.recordsProcessed +
       workbuddyResult.recordsProcessed +
+      workbuddyAiResult.recordsProcessed +
       ompResult.recordsProcessed +
       omoResult.recordsProcessed +
       piResult.recordsProcessed +
@@ -3291,6 +3343,7 @@ async function cmdSync(argv, context = {}) {
       kimiCodeResult.bucketsQueued +
       codebuddyResult.bucketsQueued +
       workbuddyResult.bucketsQueued +
+      workbuddyAiResult.bucketsQueued +
       ompResult.bucketsQueued +
       omoResult.bucketsQueued +
       piResult.bucketsQueued +
@@ -3362,12 +3415,13 @@ async function cmdSync(argv, context = {}) {
     if (legacyBaseUrlMigration) {
       delete runtimeConfig.anonKey;
     }
-    if (legacyBaseUrlMigration?.replacementDeviceToken) {
-      runtimeConfig.deviceToken = legacyBaseUrlMigration.replacementDeviceToken;
+    if (legacyBaseUrlMigration) {
+      runtimeConfig.deviceToken = legacyBaseUrlMigration.replacementDeviceToken || legacyBaseUrlMigration.previousDeviceToken;
+      runtimeConfig.deviceTokenBaseUrl = resolveRuntimeConfig({ config: runtimeConfig, env: process.env }).baseUrl;
     }
     // An authenticated local API supplies this capability for this upload.
     // Keep a separately configured CLI account from overriding its owner.
-    const runtime = resolveRuntimeConfig({
+    const resolvedRuntime = resolveRuntimeConfig({
       cli: {
         deviceToken: process.env.TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN,
         ...(process.env.TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN ? {
@@ -3378,6 +3432,12 @@ async function cmdSync(argv, context = {}) {
       config: runtimeConfig,
       env: process.env,
     });
+
+    // Empty is an explicit local-server denial, so it cannot fall back to a
+    // separately configured CLI account when the browser is signed out.
+    const runtime = Object.hasOwn(process.env, "TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN")
+      ? { ...resolvedRuntime, deviceToken: resolvedRuntime.configurationError ? null : process.env.TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN }
+      : resolvedRuntime;
 
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
@@ -3406,22 +3466,25 @@ async function cmdSync(argv, context = {}) {
         0,
         queueSizeBefore - destinationOffsetBefore,
       );
-      // Native publication owns a five-minute timer. Drains and a pending
-      // backend migration also bypass the success interval, but all automatic
-      // producers must respect a failed upload's retry deadline.
-      const bypassSuccessInterval = opts.publishAccount || opts.drain || legacyBaseUrlMigration;
+      // Automatic producers honor success and failure deadlines. A verified
+      // manual recheck may probe changed membership; the server decides access.
+      const bypassSuccessInterval = (!opts.auto && opts.drain) || legacyBaseUrlMigration;
       const lastSuccessMs = Number(uploadThrottleState.lastSuccessMs || 0);
       const successDeadline = lastSuccessMs > 0
-        ? Math.min(Number(uploadThrottleState.nextAllowedAtMs || 0),
-          lastSuccessMs + AUTO_UPLOAD_CONFIG.intervalMs + AUTO_UPLOAD_DEFAULTS.jitterMsMax)
+        ? Math.max(Number(uploadThrottleState.serverNextAllowedAtMs || 0), Math.min(Number(uploadThrottleState.nextAllowedAtMs || 0),
+          lastSuccessMs + AUTO_UPLOAD_CONFIG.intervalMs + AUTO_UPLOAD_DEFAULTS.jitterMsMax))
         : Number(uploadThrottleState.nextAllowedAtMs || 0);
+      const recheckCloudAccess = opts.drain && process.env.TOKENTRACKER_CLOUD_RECHECK === "1" &&
+        Boolean(process.env.TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN?.trim());
+      const storedBackoff = recheckCloudAccess ? 0 : Number(uploadThrottleState.backoffUntilMs || 0);
       autoUploadDecision = decideAutoUpload({
         nowMs: Date.now(),
         pendingBytes: pendingBytesBefore,
         state: {
           ...uploadThrottleState,
-          nextAllowedAtMs: bypassSuccessInterval
-            ? Number(uploadThrottleState.backoffUntilMs || 0)
+          backoffUntilMs: storedBackoff,
+          nextAllowedAtMs: recheckCloudAccess ? 0 : bypassSuccessInterval
+            ? Math.max(storedBackoff, Number(uploadThrottleState.serverNextAllowedAtMs || 0))
             : successDeadline,
         },
         config: AUTO_UPLOAD_CONFIG,
@@ -3462,6 +3525,7 @@ async function cmdSync(argv, context = {}) {
           const replacementDeviceToken = legacyBaseUrlMigration?.replacementDeviceToken;
           const stateAfterFailure = (await readJson(queueStatePath)) || { offset: 0 };
           const canFallbackWithoutSplittingHistory =
+            !Object.hasOwn(process.env, "TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN") &&
             (error?.status === 401 || error?.status === 403) &&
             replacementDeviceToken &&
             fallbackDeviceToken &&
@@ -3490,6 +3554,7 @@ async function cmdSync(argv, context = {}) {
             if (!hasLegacyBaseUrl && !hasUnchangedLegacyAnonKey) return null;
             if (hasLegacyBaseUrl) {
               latestConfig.deviceToken = successfulDeviceToken;
+              latestConfig.deviceTokenBaseUrl = runtime.baseUrl;
               delete latestConfig.baseUrl;
             }
             if (hasUnchangedLegacyAnonKey) {
@@ -3500,12 +3565,16 @@ async function cmdSync(argv, context = {}) {
         }
         // Record success so the exponential backoff step resets — otherwise
         // a single past failure keeps us pessimistically throttled forever.
-        uploadThrottleState = recordUploadSuccess({
-          nowMs: Date.now(),
-          state: uploadThrottleState,
-          config: AUTO_UPLOAD_CONFIG,
-        });
-        await writeJson(uploadThrottlePath, uploadThrottleState);
+        if (uploadResult.batches > 0) {
+          uploadThrottleState = recordUploadSuccess({
+            nowMs: Date.now(),
+            state: uploadThrottleState,
+            config: AUTO_UPLOAD_CONFIG,
+            cloudAccess: uploadResult.cloudAccess,
+            attemptId: process.env.TOKENTRACKER_LOCAL_SYNC_ATTEMPT_ID,
+          });
+          await writeJson(uploadThrottlePath, uploadThrottleState);
+        }
       } catch (e) {
         // Persist a backoff on 429 / 5xx so the next auto-sync waits instead
         // of retrying immediately and making the rate-limit worse. The
@@ -4238,6 +4307,8 @@ async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, accountId, mac
   let inserted = 0;
   let skipped = 0;
   let batches = 0;
+  let cloudAccess = null;
+  const uploadId = crypto.randomUUID();
 
   const queueSize = await safeStatSize(queuePath);
   const limit = Math.min(Math.max(1, Math.floor(Number(batchSize || 200))), MAX_INGEST_BUCKETS);
@@ -4263,6 +4334,7 @@ async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, accountId, mac
       method: "POST",
       headers,
       body: JSON.stringify({
+        upload_id: uploadId,
         hourly: result.buckets,
         ...(result.sessionStates.length > 0
           ? { account_session_states: result.sessionStates }
@@ -4277,14 +4349,15 @@ async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, accountId, mac
       const err = new Error(`HTTP ${res.status}: ${rawText.substring(0, 500)}`);
       err.status = res.status;
       err.code = res.status === 401 ? "CLOUD_DEVICE_TOKEN_REJECTED"
-        : res.status === 403 ? "CLOUD_UPLOAD_FORBIDDEN"
-          : "CLOUD_UPLOAD_FAILED";
+        : typeof data?.code === "string" ? data.code
+          : res.status === 403 ? "CLOUD_UPLOAD_FORBIDDEN" : "CLOUD_UPLOAD_FAILED";
       const retryAfter = res.headers?.get?.("Retry-After") ?? null;
       const retryAfterMs = parseRetryAfterMs(retryAfter);
       if (retryAfterMs !== null) err.retryAfterMs = retryAfterMs;
       throw err;
     }
 
+    cloudAccess = data;
     inserted += Number(data?.inserted || 0);
     skipped += Number(data?.skipped || 0);
     batches += 1;
@@ -4303,7 +4376,7 @@ async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, accountId, mac
     await writeJson(queueStatePath, state);
   }
 
-  return { inserted, skipped, batches };
+  return { inserted, skipped, batches, ...(cloudAccess?.next_allowed_at ? { cloudAccess } : {}) };
 }
 
 async function readQueueBatch(queuePath, startOffset, maxBuckets) {

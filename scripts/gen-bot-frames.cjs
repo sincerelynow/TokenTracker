@@ -38,36 +38,35 @@ const MENUBAR_FPS = 24;
 
 /** Bundle the TypeScript engine into something require() can load. */
 function loadEngine() {
-  // Keep the temporary entry on the same drive as the repository. esbuild
-  // cannot resolve Windows drive-letter imports from an entry in another
-  // drive's temp directory.
-  const entry = path.join(ROOT, `.bot-engine-entry-${process.pid}.mjs`);
-  const bundle = path.join(ROOT, `.bot-engine-${process.pid}.cjs`);
-  const modulePath = (relativePath) =>
-    JSON.stringify(`./${relativePath.replace(/\\/g, "/")}`);
-  fs.writeFileSync(
-    entry,
-    [
-      `export { BotEngine } from ${modulePath("dashboard/src/lib/bot/engine.ts")}`,
-      `export { STATES, STATE_BY_ID } from ${modulePath("dashboard/src/lib/bot/states.ts")}`,
-      `export { SHAPE_BY_ID, COLOR_BY_ID } from ${modulePath("dashboard/src/lib/bot/skins.ts")}`,
-      `export { EXPRESSION_BY_ID } from ${modulePath("dashboard/src/lib/bot/expressions.ts")}`,
-      `export { RAYON, DEMI_VIEWBOX } from ${modulePath("dashboard/src/lib/bot/repere.ts")}`,
-      `export * from ${modulePath("dashboard/src/lib/bot-appearance.js")}`,
-    ].join("\n"),
-  );
-  buildSync({
-    entryPoints: [entry],
-    bundle: true,
-    platform: "node",
-    format: "cjs",
-    logLevel: "warning",
-    outfile: bundle,
-  });
-  const loaded = require(bundle);
-  fs.rmSync(entry, { force: true });
-  fs.rmSync(bundle, { force: true });
-  return loaded;
+  const tempDir = fs.mkdtempSync(path.join(ROOT, ".bot-engine-"));
+  const entry = path.join(tempDir, "entry.mjs");
+  const bundle = path.join(tempDir, "engine.cjs");
+  try {
+    fs.writeFileSync(
+      entry,
+      [
+        `export { BotEngine } from ${JSON.stringify("../dashboard/src/lib/bot/engine.ts")}`,
+        `export { STATES, STATE_BY_ID } from ${JSON.stringify("../dashboard/src/lib/bot/states.ts")}`,
+        `export { SHAPE_BY_ID, COLOR_BY_ID } from ${JSON.stringify("../dashboard/src/lib/bot/skins.ts")}`,
+        `export { EXPRESSION_BY_ID } from ${JSON.stringify("../dashboard/src/lib/bot/expressions.ts")}`,
+        `export { RAYON, DEMI_VIEWBOX } from ${JSON.stringify("../dashboard/src/lib/bot/repere.ts")}`,
+        `export * from ${JSON.stringify("../dashboard/src/lib/bot-appearance.js")}`,
+      ].join("\n"),
+    );
+    buildSync({
+      entryPoints: [entry],
+      bundle: true,
+      platform: "node",
+      format: "cjs",
+      logLevel: "warning",
+      outfile: bundle,
+    });
+    return require(bundle);
+  } finally {
+    fs.rmSync(entry, { force: true });
+    fs.rmSync(bundle, { force: true });
+    fs.rmdirSync(tempDir);
+  }
 }
 
 const round = (value, digits) => {

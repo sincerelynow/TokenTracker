@@ -286,6 +286,30 @@ describe("SessionsPage", () => {
     expect(getSessions).toHaveBeenCalledTimes(1);
   });
 
+  it("recomputes selected root totals when the custom date range changes", async () => {
+    window.history.replaceState(null, "", "/sessions?source=codex&from=2026-07-23&to=2026-07-23");
+    const ipc = { ...response.sessions[1], session_hash: "cross-day-ipc", title: "Cross-day IPC", source_instance: "ipc", instance_label: "CODEX_IPC", started_at: "2026-07-22T08:00:00Z", ended_at: "2026-07-23T08:20:00Z", total_tokens: 9000, own_total_tokens: 9000, cost_usd: 0.09,
+      usage_buckets: [
+        { timestamp: "2026-07-22T08:10:00Z", model: "gpt-5.6-sol", total_tokens: 5000, cost_usd: 0.05 },
+        { timestamp: "2026-07-23T08:10:00Z", model: "gpt-5.6-sol", total_tokens: 4000, cost_usd: 0.04 },
+      ],
+    };
+    const primary = { ...ipc, session_hash: "cross-day-primary", title: "Cross-day primary", source_instance: "primary", instance_label: "CODEX" };
+    getSessions.mockResolvedValue({ ...response, sessions: [primary, ipc] });
+    render(<SessionsPage />);
+    await screen.findByText("Cross-day IPC");
+    await chooseSelect("Filter by Codex root", "CODEX_IPC");
+    const summary = screen.getByText("Matching sessions").closest("dl");
+    expect(within(summary).getByText("4K")).toBeInTheDocument();
+    expect(within(summary).getByText("$0.04")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Sessions from"), { target: { value: "2026-07-22" } });
+    fireEvent.change(screen.getByLabelText("Sessions through"), { target: { value: "2026-07-22" } });
+    expect(within(summary).getByText("5K")).toBeInTheDocument();
+    expect(within(summary).getByText("$0.05")).toBeInTheDocument();
+    expect(screen.queryByText("Cross-day primary")).not.toBeInTheDocument();
+    expect(getSessions).toHaveBeenCalledTimes(1);
+  });
+
   it("hides the Codex root control for one instance and legacy rows", async () => {
     getSessions.mockResolvedValue({
       ...response,
@@ -649,6 +673,7 @@ describe("SessionsPage", () => {
     render(<SessionsPage />);
     const overnight = (await screen.findByRole("button", { name: "View statistics for Overnight run" })).closest("li");
     const morning = screen.getByRole("button", { name: "View statistics for Morning run" }).closest("li");
+    // Match the mocked UI locale, rather than the Windows host's default.
     const day = started.toLocaleDateString("en", { day: "numeric" });
     expect(within(overnight).getByText((text) => text.includes(day) && /\d{4}/.test(text))).toBeInTheDocument();
     expect(within(morning).queryByText(/\d{4}/)).not.toBeInTheDocument();
@@ -866,8 +891,39 @@ describe("SessionsPage", () => {
     expect(screen.getByLabelText("Sessions through")).toHaveValue("");
     const scope = copy("sessions.summary.scope");
     expect(screen.queryByText(scope)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: copy("sessions.summary.scope_help") }));
+    const user = userEvent.setup();
+    const help = screen.getByRole("button", { name: copy("sessions.summary.scope_help") });
+    await user.hover(help);
     expect(await screen.findByText(scope)).toBeInTheDocument();
+    await user.unhover(help);
+    await waitFor(() => expect(screen.queryByText(scope)).not.toBeInTheDocument());
+    await user.click(help);
+    expect(await screen.findByText(scope)).toBeInTheDocument();
+    expect(getSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the speed explanation on keyboard focus and dismisses it with Escape", async () => {
+    render(<SessionsPage />);
+    await screen.findByText("Fix authentication flow");
+    const user = userEvent.setup();
+    const help = screen.getByRole("button", { name: copy("sessions.summary.scope_help") });
+    expect(help.closest("dt")).toHaveTextContent(copy("sessions.summary.speed"));
+
+    screen.getByRole("button", { name: copy("sessions.filter.model_aria") }).focus();
+    await user.tab();
+    expect(help).toHaveFocus();
+    expect(await screen.findByText(copy("sessions.summary.scope"))).toHaveAttribute("role", "tooltip");
+    expect(help).toHaveAccessibleDescription(copy("sessions.summary.scope"));
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByText(copy("sessions.summary.scope"))).not.toBeInTheDocument());
+    expect(help).toHaveFocus();
+    expect(help).not.toHaveAttribute("aria-describedby");
+
+    await user.tab();
+    await user.tab({ shift: true });
+    expect(help).toHaveFocus();
+    expect(await screen.findByText(copy("sessions.summary.scope"))).toHaveAttribute("role", "tooltip");
     expect(getSessions).toHaveBeenCalledTimes(1);
   });
 });

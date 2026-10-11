@@ -29,6 +29,7 @@ struct TokenTrackerBarApp: App {
                     .keyboardShortcut(",", modifiers: .command)
                 }
                 // Default Help menu shows "Help isn't available" — open the website.
+                #if !TOKENTRACKER_NATIVE_QA
                 CommandGroup(replacing: .help) {
                     Button(Strings.menuHelp) {
                         if let url = URL(string: "https://www.tokentracker.cc") {
@@ -36,6 +37,7 @@ struct TokenTrackerBarApp: App {
                         }
                     }
                 }
+                #endif
             }
     }
 }
@@ -71,9 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusBarController: StatusBarController?
     private var lastWakeCatchUpAttemptAt: Date?
-    private let viewModel = DashboardViewModel()
-    private let serverManager = ServerManager()
-    private let launchAtLoginManager = LaunchAtLoginManager()
+    private lazy var viewModel = DashboardViewModel()
+    private lazy var serverManager = ServerManager()
+    private lazy var launchAtLoginManager = LaunchAtLoginManager()
     private lazy var desktopPetController = DesktopPetWindowController(viewModel: viewModel)
     private lazy var dynamicIslandController = DynamicIslandController(viewModel: viewModel)
     private static var userInitiatedQuit = false
@@ -118,6 +120,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let profile = NativeQAProfile.current {
+            Task { @MainActor in
+                guard await profile.verifyServer() else { fatalError("Native QA server identity rejected") }
+                DashboardWindowController.shared.allowDashboardNavigation()
+                DashboardPresentationCoordinator.shared.showDashboard()
+            }
+            return
+        }
         removeLegacyAppBundleIfNeeded()
         NativeLocalization.synchronizeSharedPreference()
 
@@ -164,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         DashboardPresentationCoordinator.shared.prepareForTermination()
+        if NativeQAProfile.current != nil { return }
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         serverManager.stopServer()
     }
@@ -211,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func scheduleWakeCatchUp(_ notification: Notification) {
+        guard NativeQAProfile.current == nil else { return }
         let now = Date()
         if let lastWakeCatchUpAttemptAt,
            now.timeIntervalSince(lastWakeCatchUpAttemptAt) < Self.wakeCatchUpDebounceInterval {
@@ -225,9 +237,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        if let profile = NativeQAProfile.current {
+            for url in urls {
+                guard let order = try? profile.billingReturnOrder(url) else {
+                    fatalError("Native QA billing return rejected")
+                }
+                Task { @MainActor in
+                    guard await profile.approveOwnedOrder(order) else { fatalError("Native QA order ownership rejected") }
+                    DashboardWindowController.shared.handleNativeQABillingReturn(order: order)
+                }
+            }
+            return
+        }
         for url in urls {
             guard url.scheme == "tokentracker" else { continue }
-            if url.host == "auth" && url.path.hasPrefix("/done") {
+            if let order = NativeBillingReturn.orderID(from: url) {
+                DashboardWindowController.shared.handleBillingReturn(order: order)
+            } else if url.host == "auth" && url.path.hasPrefix("/done") {
                 DashboardWindowController.shared.handleAuthDone()
             } else if url.host == "auth" && url.path.hasPrefix("/callback") {
                 // Browser relays OAuth code back via tokentracker://auth/callback?insforge_code=xxx

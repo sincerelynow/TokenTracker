@@ -84,8 +84,12 @@ export default async function (req: Request): Promise<Response> {
   const dashboardUrl = Deno.env.get("TOKENTRACKER_DASHBOARD_URL") ?? "http://localhost:7680";
   let verificationUri: URL;
   try {
-    verificationUri = new URL("/device", dashboardUrl);
-    if (!["https:", "http:"].includes(verificationUri.protocol)) throw new Error("invalid protocol");
+    const dashboard = new URL(dashboardUrl);
+    if (dashboard.username || dashboard.password ||
+      (dashboard.protocol !== "https:" && !(dashboard.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(dashboard.hostname)))) {
+      throw new Error("dashboard URL must use HTTPS or loopback HTTP");
+    }
+    verificationUri = new URL("/device", dashboard);
   } catch {
     return json({ error: "misconfigured dashboard URL" }, 500);
   }

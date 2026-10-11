@@ -7,6 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { cmdDeviceLogin, pollOnce } = require("../src/commands/device-login");
+const publicAnon = [Buffer.from('{"alg":"HS256"}').toString("base64url"),
+  Buffer.from('{"role":"anon"}').toString("base64url"), "test-signature"].join(".");
 
 test("pollOnce maps approved device token fields from server response", async () => {
   const originalFetch = global.fetch;
@@ -63,7 +65,7 @@ test("cmdDeviceLogin persists the approved device token used by sync", async () 
       configPath,
       JSON.stringify({
         ...currentConfig,
-        anonKey: "current-anon-key",
+        anonKey: publicAnon,
         concurrentSetting: "preserved",
       }),
       "utf8",
@@ -84,13 +86,15 @@ test("cmdDeviceLogin persists the approved device token used by sync", async () 
   process.stdout.write = (chunk) => { output += chunk; return true; };
 
   try {
-    await cmdDeviceLogin(["--base-url", "https://example.invalid"], { home, sleep: async () => {} });
+    await cmdDeviceLogin(["--base-url", "https://example.invalid", "--anon-key", publicAnon,
+      "--dashboard-url", "http://localhost:7680"], { home, sleep: async () => {} });
     const config = JSON.parse(await fs.readFile(configPath, "utf8"));
     assert.equal(config.user_id, "user-1");
     assert.equal(config.deviceToken, "device-token-1");
     assert.equal(config.deviceId, "device-1");
     assert.equal(config.baseUrl, "https://example.invalid");
-    assert.equal(config.anonKey, "current-anon-key");
+    assert.equal(config.anonKey, publicAnon);
+    assert.equal(config.deviceTokenBaseUrl, "https://example.invalid");
     assert.equal(config.concurrentSetting, "preserved");
     assert.equal(calls.length, 2);
     assert.match(output, /http:\/\/localhost:7680\/device\?user_code=ABCD-2345/);
@@ -147,7 +151,8 @@ test("cmdDeviceLogin rejects approved responses without a usable device token", 
 
   try {
     await assert.rejects(
-      () => cmdDeviceLogin(["--base-url", "https://example.invalid"], { home, sleep: async () => {} }),
+      () => cmdDeviceLogin(["--base-url", "https://example.invalid", "--anon-key", publicAnon,
+        "--dashboard-url", "https://www.tokentracker.cc"], { home, sleep: async () => {} }),
       /server did not return a device token/,
     );
     // Login start persists a machineId in config.json (machine-anchored

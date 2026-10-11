@@ -1,49 +1,121 @@
-import { afterEach, expect, test, vi } from "vitest";
-import { getInsforgeAnonKey, getInsforgeRemoteUrl, isCloudInsforgeConfigured, loadRuntimeInsforgeConfig } from "./insforge-config";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const sdk = vi.hoisted(() => ({ create: vi.fn() }));
+vi.mock("@insforge/sdk", () => ({ createClient: sdk.create }));
+const anon = (name: string) => `${btoa('{"alg":"HS256"}').replace(/=+$/, "")}.${btoa(JSON.stringify({ role: "anon", sub: name })).replace(/=+$/, "")}.signature`;
+beforeEach(() => {
+  vi.resetModules();
+  sdk.create.mockReset().mockImplementation((config) => ({ config, tokenManager: { clearSession: vi.fn() } }));
+  localStorage.clear(); sessionStorage.clear();
+  delete window.__TOKENTRACKER_RUNTIME_CONFIG__;
+  for (const key of ["VITE_INSFORGE_BASE_URL", "VITE_INSFORGE_ANON_KEY", "VITE_TOKENTRACKER_BACKEND_BASE_URL", "VITE_TOKENTRACKER_BACKEND_ANON_KEY"]) vi.stubEnv(key, "");
+});
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); delete window.__TOKENTRACKER_RUNTIME_CONFIG__; });
 
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
-
-test("localhost cloud login prefers public CLI config and falls back for older servers", async () => {
-  vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://personal.example.insforge.app");
-  vi.stubEnv("VITE_INSFORGE_ANON_KEY", "anon-public-test");
-  expect(window.location.protocol).toBe("http:");
-  expect(isCloudInsforgeConfigured()).toBe(true);
-
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok: true,
-    json: async () => ({ baseUrl: "https://runtime.example", anonKey: "runtime-public" }),
+describe("instance-bound frontend SDK", () => {
+  it("keeps an explicitly configured singleton and OAuth callback behavior", async () => {
+    vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://personal.example");
+    vi.stubEnv("VITE_INSFORGE_ANON_KEY", anon("personal"));
+    const config = await import("./insforge-config");
+    const client = config.getOrCreateInsforgeClient();
+    expect(config.getOrCreateInsforgeClient()).toBe(client);
+    expect(sdk.create).toHaveBeenCalledTimes(1);
+    expect(sdk.create.mock.calls[0][0].auth.detectOAuthCallback).toBe(true);
   });
-  vi.stubGlobal("fetch", fetchMock);
-  await loadRuntimeInsforgeConfig();
-  expect(fetchMock).toHaveBeenCalledWith("/functions/tokentracker-cloud-config", expect.objectContaining({ cache: "no-store" }));
-  expect(getInsforgeRemoteUrl()).toBe("https://runtime.example");
-  expect(getInsforgeAnonKey()).toBe("runtime-public");
-  vi.stubEnv("VITE_INSFORGE_BASE_URL", "");
-  vi.stubEnv("VITE_INSFORGE_ANON_KEY", "");
-  expect(isCloudInsforgeConfigured()).toBe(true);
-
-  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ baseUrl: "", anonKey: "" }) });
-  await loadRuntimeInsforgeConfig();
-  expect(isCloudInsforgeConfigured()).toBe(false);
-
-  vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://personal.example.insforge.app");
-  vi.stubEnv("VITE_INSFORGE_ANON_KEY", "anon-public-test");
-  fetchMock.mockResolvedValue({ ok: false });
-  await loadRuntimeInsforgeConfig();
-  expect(getInsforgeRemoteUrl()).toBe("https://personal.example.insforge.app");
+  it("uses the synchronous runtime descriptor over build values and fails closed on its error", async () => {
+    vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://build.example");
+    vi.stubEnv("VITE_INSFORGE_ANON_KEY", anon("build"));
+    window.__TOKENTRACKER_RUNTIME_CONFIG__ = { baseUrl: "https://runtime.example", anonKey: anon("runtime") };
+    const config = await import("./insforge-config");
+    expect(config.getInsforgeRemoteUrl()).toBe("https://runtime.example");
+    expect(config.getInsforgeConnectionHost()).toBe("runtime.example");
+    window.__TOKENTRACKER_RUNTIME_CONFIG__ = { baseUrl: "https://runtime.example", configurationError: "missing anon" };
+    expect(config.getInsforgeRemoteUrl()).toBe("");
+    expect(config.getInsforgeAnonKey()).toBe("");
+    expect(config.isCloudInsforgeConfigured()).toBe(false);
+    expect(config.getInsforgeConnectionHost()).toBeNull();
+    expect(config.getOrCreateInsforgeClient()).toBeNull();
+  });
+  it("does not expose the official key when custom VITE deployment forgot its key", async () => {
+    vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://custom.example");
+    const config = await import("./insforge-config");
+    expect(config.getInsforgeConfigurationError()).toBe("missing_backend_anon_key");
+    expect(config.getInsforgeAnonKey()).toBe("");
+    expect(config.getOrCreateInsforgeClient()).toBeNull();
+    expect(sdk.create).not.toHaveBeenCalled();
+  });
+  it("clears only SDK auth/PKCE when the instance changes and refuses stale clients", async () => {
+    const config = await import("./insforge-config");
+    vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://personal.example");
+    vi.stubEnv("VITE_INSFORGE_ANON_KEY", anon("personal"));
+    const original: any = config.getOrCreateInsforgeClient();
+    sessionStorage.setItem("insforge_pkce_verifier", "old-pkce");
+    localStorage.setItem("insforge_auth", "old-auth");
+    localStorage.setItem("tt.providerPrefs", "keep");
+    localStorage.setItem("tt.local.history", "keep");
+    window.__TOKENTRACKER_RUNTIME_CONFIG__ = { baseUrl: "https://other.example", anonKey: anon("other") };
+    const replacement = config.getOrCreateInsforgeClient();
+    expect(replacement).not.toBe(original);
+    expect(original.tokenManager.clearSession).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("insforge_pkce_verifier")).toBeNull();
+    expect(localStorage.getItem("insforge_auth")).toBeNull();
+    expect(localStorage.getItem("tt.providerPrefs")).toBe("keep");
+    expect(localStorage.getItem("tt.local.history")).toBe("keep");
+    expect(config.isCurrentInsforgeClient(original)).toBe(false);
+    expect(config.isCurrentInsforgeClient(replacement)).toBe(true);
+    expect(config.shouldRestoreInsforgeSession()).toBe(false);
+  });
+  it("marks only same-origin runtime proxies and never adds that header to direct remote calls", async () => {
+    window.__TOKENTRACKER_RUNTIME_CONFIG__ = { baseUrl: "https://private.example", anonKey: anon("private") };
+    const config = await import("./insforge-config");
+    config.getOrCreateInsforgeClient();
+    const transport = sdk.create.mock.calls[0][0].fetch;
+    const request = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", request);
+    await transport(`${window.location.origin}/api/auth/refresh`, { headers: { Accept: "application/json" } });
+    expect(new Headers(request.mock.calls[0][1].headers).get("x-tokentracker-instance")).toBe("https://private.example");
+    await transport("https://private.example/functions/example", { headers: { Accept: "application/json" } });
+    expect(new Headers(request.mock.calls[1][1].headers).has("x-tokentracker-instance")).toBe(false);
+  });
 });
 
-test("hosted dashboard uses build-time config without requesting local CLI config", async () => {
+it("leaves cloud authentication disabled without an explicit runtime or build target", async () => {
+  const config = await import("./insforge-config");
+  expect(config.getInsforgeRemoteUrl()).toBe("");
+  expect(config.getInsforgeAnonKey()).toBe("");
+  expect(config.getOrCreateInsforgeClient()).toBeNull();
+  expect(sdk.create).not.toHaveBeenCalled();
+});
+it("loads the public CLI pair without build variables and fails closed on incomplete local settings", async () => {
+  vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://build.example");
+  vi.stubEnv("VITE_INSFORGE_ANON_KEY", anon("build"));
+  const config = await import("./insforge-config");
+  const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ baseUrl: "https://runtime.example", anonKey: anon("runtime"), deviceToken: "private" }) });
+  vi.stubGlobal("fetch", request);
+  await config.loadRuntimeInsforgeConfig();
+  expect(request).toHaveBeenCalledWith("/functions/tokentracker-cloud-config", expect.objectContaining({ cache: "no-store" }));
+  expect(config.getInsforgeRemoteUrl()).toBe("https://runtime.example");
+  expect(window.__TOKENTRACKER_RUNTIME_CONFIG__).not.toHaveProperty("deviceToken");
+  vi.stubEnv("VITE_INSFORGE_BASE_URL", ""); vi.stubEnv("VITE_INSFORGE_ANON_KEY", "");
+  expect(config.isCloudInsforgeConfigured()).toBe(true);
+  delete window.__TOKENTRACKER_RUNTIME_CONFIG__;
+  request.mockResolvedValue({ ok: true, json: async () => ({ baseUrl: "https://runtime.example" }) });
+  await config.loadRuntimeInsforgeConfig();
+  expect(config.isCloudInsforgeConfigured()).toBe(false);
+});
+it("preserves a synchronous runtime error and uses explicit build config only for older local servers", async () => {
+  const config = await import("./insforge-config");
+  vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://build.example"); vi.stubEnv("VITE_INSFORGE_ANON_KEY", anon("build"));
+  const request = vi.fn().mockResolvedValue({ ok: false }); vi.stubGlobal("fetch", request);
+  window.__TOKENTRACKER_RUNTIME_CONFIG__ = { configurationError: "invalid_local_config" };
+  await config.loadRuntimeInsforgeConfig();
+  expect(request).not.toHaveBeenCalled(); expect(config.isCloudInsforgeConfigured()).toBe(false);
+  delete window.__TOKENTRACKER_RUNTIME_CONFIG__;
+  await config.loadRuntimeInsforgeConfig(); expect(config.getInsforgeRemoteUrl()).toBe("https://build.example");
+});
+it("uses explicit hosted config without requesting a local endpoint", async () => {
   vi.stubGlobal("window", { location: { hostname: "dashboard.example", origin: "https://dashboard.example" } });
-  vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://hosted.example.insforge.app");
-  vi.stubEnv("VITE_INSFORGE_ANON_KEY", "hosted-public");
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-
-  await loadRuntimeInsforgeConfig();
-
-  expect(fetchMock).not.toHaveBeenCalled();
-  expect(getInsforgeRemoteUrl()).toBe("https://hosted.example.insforge.app");
-  expect(getInsforgeAnonKey()).toBe("hosted-public");
-  expect(isCloudInsforgeConfigured()).toBe(true);
+  vi.stubEnv("VITE_INSFORGE_BASE_URL", "https://hosted.example"); vi.stubEnv("VITE_INSFORGE_ANON_KEY", anon("hosted"));
+  const config = await import("./insforge-config"); const request = vi.fn(); vi.stubGlobal("fetch", request);
+  await config.loadRuntimeInsforgeConfig();
+  expect(request).not.toHaveBeenCalled(); expect(config.getInsforgeRemoteUrl()).toBe("https://hosted.example");
 });

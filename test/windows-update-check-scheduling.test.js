@@ -21,7 +21,7 @@ test("Windows updater rejects all checks before any upstream request", () => {
   );
   assert.match(
     source,
-    /public async Task<CheckOutcome> CheckAsync\(bool silent\)\n\s*\{\n\s*if \(!UpstreamUpdatesEnabled\)[\s\S]*?return CheckOutcome\.Skipped;[\s\S]*?FetchLatestReleaseAsync\(\)/,
+    /public async Task<CheckOutcome> CheckAsync\(bool silent\)\n\s*\{\n\s*if \(!UpstreamUpdatesEnabled\)[\s\S]*?return CheckOutcome\.Skipped;[\s\S]*?_releaseClient\.FetchLatestAsync\(/,
     "CheckAsync must return before reaching the release API",
   );
   assert.match(

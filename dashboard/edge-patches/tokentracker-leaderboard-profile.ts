@@ -589,7 +589,7 @@ function computeRowCost(row: UsageRow): number {
 const KNOWN_SOURCES = new Set([
   "acode", "codex", "claude", "gemini", "cursor", "opencode", "openclaw",
   "hermes", "kiro", "copilot", "pi-anthropic", "pi-github-copilot",
-  "pi-copilot", "kimi", "droid", "dsh",
+  "pi-copilot", "kimi", "droid", "dsh", "dumate",
 ]);
 function canonicalSource(s: string) {
   if (s.startsWith("codex-root:")) return "codex";

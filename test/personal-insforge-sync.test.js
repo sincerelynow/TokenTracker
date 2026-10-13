@@ -5,7 +5,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
-const { drainQueueToCloud } = require("../src/commands/sync");
+const { compactPendingQueue } = require("../src/lib/upload-queue");
+const { drainQueueToCloud, getCloudUploadCompactionOffset } = require("../src/commands/sync");
 
 test("upload checkpoints are isolated by InsForge destination", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-personal-insforge-"));
@@ -107,4 +108,55 @@ test("Codex and DSH root rows retain four independent sources without local path
   assert.deepEqual(requests[0].hourly.map((row) => row.source), sources);
   assert.equal(requests[0].hourly.reduce((sum, row) => sum + row.total_tokens, 0), 10);
   assert.equal(JSON.stringify(requests[0]).includes(dir), false);
+});
+
+
+test("pending compaction preserves every destination, account and machine checkpoint", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-multi-compaction-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const queuePath = path.join(dir, "queue.jsonl");
+  const queueStatePath = path.join(dir, "queue.state.json");
+  const encode = (model, tokens) => JSON.stringify({ source: "codex-root:first", model,
+    hour_start: "2026-01-01T00:00:00Z", input_tokens: tokens, output_tokens: 0, total_tokens: tokens }) + "\n";
+  const first = encode("one", 10);
+  const second = encode("two", 20);
+  const prefix = first + second;
+  const oldTail = encode("three", 30);
+  const latestTail = encode("three", 5);
+  fs.writeFileSync(queuePath, prefix + oldTail + latestTail);
+  const state = { offset: Buffer.byteLength(first), destinations: {
+    "https://one.example": { accounts: { user: { machine: { offset: Buffer.byteLength(first) },
+      other: { offset: Buffer.byteLength(prefix) } } } },
+    "https://two.example": { accounts: { user: { machine: { offset: Buffer.byteLength(prefix) } },
+      other: { machine: { offset: 0 } } } },
+    "https://legacy.example": { offset: Buffer.byteLength(first) },
+  } };
+  fs.writeFileSync(queueStatePath, JSON.stringify(state));
+  const result = await compactPendingQueue({ queuePath, offset: getCloudUploadCompactionOffset(state), minPendingBytes: 0 });
+  assert.equal(result.compacted, true);
+  assert.equal(fs.readFileSync(queuePath, "utf8"), prefix + latestTail);
+  assert.deepEqual(JSON.parse(fs.readFileSync(queueStatePath, "utf8")), state);
+
+  const requests = [];
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async (_url, init) => {
+    requests.push(JSON.parse(init.body).hourly);
+    return { ok: true, text: async () => '{"inserted":1}' };
+  };
+  const cases = [
+    ["https://one.example", "user", "machine", [20, 5]],
+    ["https://two.example", "user", "machine", [5]],
+    ["https://one.example", "user", "other", [5]],
+    ["https://two.example", "other", "machine", [10, 20, 5]],
+    ["https://new.example", "new", "machine", [10, 20, 5]],
+  ];
+  for (const [baseUrl, accountId, machineId, expected] of cases) {
+    const args = { baseUrl, accountId, machineId, deviceToken: "fixture", queuePath, queueStatePath };
+    const count = requests.length;
+    assert.equal((await drainQueueToCloud(args)).batches, 1);
+    assert.deepEqual(requests[count].map((row) => row.total_tokens), expected);
+    assert.equal((await drainQueueToCloud(args)).batches, 0);
+    assert.equal(requests.length, count + 1);
+  }
 });

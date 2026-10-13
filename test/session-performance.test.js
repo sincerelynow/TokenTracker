@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { scanClaudeSession, scanCodexSession, listSessionsForBrowser, summarizeSessions, buildSessionAnalytics } = require("../src/lib/session-analytics");
 const { getModelPricingInfo, getModelPricing, computeRowCost } = require("../src/lib/pricing");
-const { mergePerformance, createCodexPerformanceCollector } = require("../src/lib/session-performance");
+const { mergePerformance, createCodexPerformanceCollector, createZcodePerformanceCollector } = require("../src/lib/session-performance");
 
 const ts = (seconds) => new Date(Date.UTC(2026, 9, 8) + seconds * 1000).toISOString();
 const usage = (output, input = 1000) => ({ input_tokens: input, cached_input_tokens: 0, output_tokens: output, total_tokens: input + output });
@@ -288,7 +288,7 @@ test("nonzero unknown Claude usage remains in model totals and partial cost", as
 });
 
 
-for (const version of [14, 15, 16]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
+for (const version of [14, 15, 16, 17, 24]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
   const rows = [context(0), output(5, "function_call"), count(10, usage(300))];
   const { home } = fixture(t, rows, "codex");
   const tracker = path.join(home, ".tokentracker/tracker");
@@ -310,7 +310,7 @@ for (const version of [14, 15, 16]) test(`version ${version} sidecars rebuild ro
   meta.version = version;
   fs.writeFileSync(metaPath, JSON.stringify(meta));
   const rebuilt = (await buildSessionAnalytics({ home }))[0];
-  assert.equal(rebuilt.version, 17);
+  assert.equal(rebuilt.version, 25);
   assert.equal(rebuilt.session_store_bytes, cold.session_store_bytes);
   assert.ok(rebuilt.session_store_bytes > 0);
   assert.equal(rebuilt.source, "codex");
@@ -319,5 +319,25 @@ for (const version of [14, 15, 16]) test(`version ${version} sidecars rebuild ro
   assert.deepEqual(rebuilt.performance, cold.performance);
   assert.ok(rebuilt.performance.estimated_tokens_per_second > 0);
   assert.deepEqual(rebuilt.model_usage[0].performance, cold.model_usage[0].performance);
-  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 17);
+  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 25);
+});
+
+test("ZCode collector converts per-request durations and first-token samples", () => {
+  const collector = createZcodePerformanceCollector();
+  collector.consumeUsage({ model: "GLM-5.3", outputTokens: 900, durationMs: 30000, timeToFirstTokenMs: 1200 });
+  collector.consumeUsage({ model: "GLM-5.3", outputTokens: 300, durationMs: 10000, timeToFirstTokenMs: 800 });
+  collector.consumeUsage({ model: "GLM-5.3", outputTokens: 50, durationMs: 5000 }); // below MIN_OUTPUT
+  collector.consumeUsage({ model: "GLM-5.3", outputTokens: 500, durationMs: 500 }); // below MIN_DURATION_MS
+  collector.consumeUsage({ model: "GLM-5.3", outputTokens: 500, durationMs: 2 * 60 * 60 * 1000 }); // above MAX_DURATION_MS
+  collector.consumeUsage({ model: "GLM-5.3", outputTokens: 100, durationMs: 4000, timeToFirstTokenMs: -1 }); // negative first token ignored
+  const { performance, byModel } = collector.finish();
+  assert.equal(performance.estimated_output_tokens, 1200);
+  assert.equal(performance.estimated_duration_ms, 40000);
+  assert.equal(performance.estimated_request_count, 2);
+  assert.ok(Math.abs(performance.estimated_tokens_per_second - 30) < 1e-9);
+  assert.equal(performance.first_response_total_ms, 2000);
+  assert.equal(performance.first_response_sample_count, 2);
+  assert.equal(performance.first_response_ms, 1000);
+  assert.equal(byModel.get("GLM-5.3").estimated_request_count, 2);
+  assert.equal(byModel.get("GLM-5.3").estimated_tokens_per_second, 30);
 });

@@ -2853,6 +2853,8 @@ async function parseClaudeFile({
       continue;
     }
 
+    if (isOmOClaudeSdkMirror(obj)) continue;
+
     const usage = obj?.message?.usage || obj?.usage;
     if (!usage || typeof usage !== "object") continue;
 
@@ -4908,6 +4910,14 @@ function isCodexTotalOnlyResetSentinel(lastUsage, totalUsage) {
 // backward compatibility for the (msgId, reqId) format already persisted in
 // cursors.claudeHashes (msgId strings don't contain `:`, so the two formats
 // share the same Set without collision).
+// OmO Native routes Anthropic-subscription turns through the Claude Agent SDK,
+// which mirrors the same usage into ~/.claude/projects with entrypoint "sdk-ts"
+// and userType "external". OmO's passive reader already counts those turns
+// under source=omo — skip the mirrored Claude transcript copy (#726).
+function isOmOClaudeSdkMirror(obj) {
+  return obj?.entrypoint === "sdk-ts" && obj?.userType === "external";
+}
+
 function claudeMessageDedupKey(obj) {
   const msgId = typeof obj?.message?.id === "string" && obj.message.id ? obj.message.id : null;
   if (!msgId) return null;
@@ -5134,16 +5144,21 @@ function buildV2Sql(sessionTable, watermark = null) {
 // sessionTable (which session table exists, session_v2 preferred over session
 // via DESC). Returns null when the probe itself fails — callers treat that as
 // v1-only, matching the pre-existing silent-degradation contract.
-function detectOpencodeMessageLayout(dbPath, sqliteOptions = {}) {
+function detectOpencodeMessageLayout(dbPath, sqliteOptions = {}, { propagateReadFailure = false } = {}) {
   let rows;
   try {
     rows = readSqliteJsonRows(
       dbPath,
       `SELECT (SELECT 1 FROM session_message LIMIT 1) AS hasRows,
               (SELECT name FROM sqlite_master WHERE name IN ('session','session_v2') ORDER BY name DESC LIMIT 1) AS sessionTable`,
-      { label: "OpenCode", timeout: 10_000, maxBuffer: 1024 * 1024, ...sqliteOptions },
+      { label: "OpenCode", timeout: 10_000, maxBuffer: 1024 * 1024, ...sqliteOptions, throwOnReadFailure: true },
     );
-  } catch (_e) {
+  } catch (error) {
+    // A missing session_message table is the normal v1-only miss; with
+    // propagateReadFailure a real read failure must reach the caller — the
+    // session scanner would otherwise skip the v2 generation silently and
+    // cache a zero-token inventory over a readable-in-principle database.
+    if (propagateReadFailure && !isMissingSqliteTableError(error)) throw error;
     return null;
   }
   if (!Array.isArray(rows) || rows.length === 0) return null;
@@ -5163,7 +5178,17 @@ function opencodeMessageProvider(data) {
   return data?.providerID || data?.model?.providerID || "";
 }
 
-function readOpencodeDbMessagesIncremental(dbPath, previousCursor = null, sqliteOptions = {}) {
+// readSqliteJsonRows wraps its two backend errors into the thrown Error, so a
+// "table genuinely absent" miss and a "database unreadable" failure look the
+// same to a caller that only catches. Both backends spell a missing table
+// "no such table" — use that to keep the normal miss on the tolerant path
+// while real read failures can propagate.
+function isMissingSqliteTableError(error) {
+  const messages = [error?.message, error?.cliError?.message, error?.nodeSqliteError?.message];
+  return messages.some((m) => typeof m === "string" && m.includes("no such table"));
+}
+
+function readOpencodeDbMessagesIncremental(dbPath, previousCursor = null, sqliteOptions = {}, { propagateReadFailure = false, includeZeroMessage } = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return { messages: [], cursor: null };
 
   const identity = opencodeDbIdentity(dbPath);
@@ -5207,16 +5232,19 @@ function readOpencodeDbMessagesIncremental(dbPath, previousCursor = null, sqlite
         toNonNegativeInt(tokens.reasoning) > 0 ||
         toNonNegativeInt(tokens.cache?.read) > 0 ||
         toNonNegativeInt(tokens.cache?.write) > 0;
-      if (!hasTokens) continue;
-      if (isV2 && typeof row.directory === "string" && row.directory.trim()) {
-        data.path = { ...(typeof data.path === "object" && data.path ? data.path : {}), cwd: row.directory };
-      }
-      out.push({
+      const message = {
         id: row.id || data.id,
         sessionID: row.session_id || data.sessionID,
         timeUpdated: row.time_updated || 0,
         data,
-      });
+      };
+      // Providers can retain zero corrections for previously counted messages.
+      // New empty records remain excluded unless the caller recognizes them.
+      if (!hasTokens && !(typeof includeZeroMessage === "function" && includeZeroMessage(message))) continue;
+      if (isV2 && typeof row.directory === "string" && row.directory.trim()) {
+        data.path = { ...(typeof data.path === "object" && data.path ? data.path : {}), cwd: row.directory };
+      }
+      out.push(message);
     }
   };
 
@@ -5230,7 +5258,11 @@ function readOpencodeDbMessagesIncremental(dbPath, previousCursor = null, sqlite
         throwOnReadFailure: true,
       });
       return Array.isArray(rows) ? rows : [];
-    } catch (_e) {
+    } catch (error) {
+      // A missing table is the normal "other generation's layout" miss; an
+      // unreadable database is not — with propagateReadFailure the session
+      // scan aborts instead of caching a zero-token inventory over it.
+      if (propagateReadFailure && !isMissingSqliteTableError(error)) throw error;
       return null; // query-level failure (e.g. wrong generation's table)
     }
   };
@@ -5308,7 +5340,7 @@ function readOpencodeDbMessagesIncremental(dbPath, previousCursor = null, sqlite
     // baseline every database carries or degrades to), v2 runs only when the
     // probe confirms session_message has rows — this avoids firing a JOIN
     // against a non-existent session table on type-A databases.
-    const probe = detectOpencodeMessageLayout(effectiveDbPath, sqliteOptions);
+    const probe = detectOpencodeMessageLayout(effectiveDbPath, sqliteOptions, { propagateReadFailure });
     const out = [];
     const nextCursor = {
       version: OPENCODE_DB_CURSOR_VERSION,
@@ -5348,8 +5380,8 @@ function readOpencodeDbMessagesIncremental(dbPath, previousCursor = null, sqlite
   }
 }
 
-function readOpencodeDbMessages(dbPath, sqliteOptions = {}) {
-  return readOpencodeDbMessagesIncremental(dbPath, null, sqliteOptions).messages;
+function readOpencodeDbMessages(dbPath, sqliteOptions = {}, { propagateReadFailure = false, includeZeroMessage } = {}) {
+  return readOpencodeDbMessagesIncremental(dbPath, null, sqliteOptions, { propagateReadFailure, includeZeroMessage }).messages;
 }
 
 // mimocode mirrors the user's Claude Code + claude-mem history into its own
@@ -5465,7 +5497,7 @@ const ZCODE_NATIVE_USAGE_COLUMNS = new Set([
   "cache_read_input_tokens",
 ]);
 
-function detectZcodeNativeUsageLayout(dbPath, sqliteOptions = {}) {
+function detectZcodeNativeUsageLayout(dbPath, sqliteOptions = {}, { propagateReadFailure = false } = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return null;
   let rows;
   try {
@@ -5482,7 +5514,11 @@ function detectZcodeNativeUsageLayout(dbPath, sqliteOptions = {}) {
         throwOnReadFailure: true,
       },
     );
-  } catch (_error) {
+  } catch (error) {
+    // propagateReadFailure: an unreadable db is a failure, not "no native
+    // layout" — the session scanner must skip the file, not fall back to an
+    // empty legacy read and cache zero tokens.
+    if (propagateReadFailure) throw error;
     return null;
   }
   const modelUsageColumns = new Set(
@@ -5523,6 +5559,79 @@ function hasZcodeNativeUsageSchema(dbPath, sqliteOptions = {}) {
   }
 }
 
+// true: readable with content; false: confirmed empty; null: unavailable or
+// unreadable. Only a confirmed empty database is safe to replace during discovery.
+function zcodeDbHasContent(dbPath, sqliteOptions = {}) {
+  if (!dbPath || !fssync.existsSync(dbPath)) return null;
+  let snapshot = null;
+  let effectiveDbPath = dbPath;
+  if (isUncPath(dbPath)) {
+    try {
+      snapshot = snapshotSqliteDb(dbPath);
+      effectiveDbPath = snapshot.path;
+    } catch (_error) {
+      // Preserve the existing direct-read fallback for transient snapshot
+      // failures and UNC implementations that support SQLite locking.
+    }
+  }
+  try {
+    const rows = readSqliteJsonRows(
+      effectiveDbPath,
+      "SELECT (SELECT COUNT(*) FROM session) AS sessions, (SELECT COUNT(*) FROM model_usage) AS requests",
+      {
+        label: "ZCode",
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024,
+        ...sqliteOptions,
+        throwOnReadFailure: true,
+      },
+    );
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return null;
+    return (Number(row.sessions) || 0) > 0 || (Number(row.requests) || 0) > 0;
+  } catch (_error) {
+    return null;
+  } finally {
+    if (snapshot) snapshot.cleanup();
+  }
+}
+
+function hasZcodeCursorState(cursors) {
+  return [cursors?.zcode, cursors?.zcode?.native, cursors?.zcode?.wsl]
+    .some((state) => Object.keys(state?.messages || {}).length > 0) ||
+    Object.keys(cursors?.hourly?.buckets || {}).some((key) => key.startsWith("zcode|")) ||
+    Object.keys(cursors?.hourly?.groupQueued || {}).some((key) => key.startsWith("zcode|")) ||
+    Object.keys(cursors?.projectHourly?.buckets || {}).some((key) => key.includes("|zcode|"));
+}
+
+// Sync, session discovery and status must select the same installs. Once sync
+// records a priority-mode choice, retain it: switching databases underneath a
+// flat cursor would accumulate both installs in the same usage ledger.
+function resolveZcodeInstallPaths({ nativeValue, wslValue } = {}, env = process.env, deps = {}) {
+  const mode = wsl.getWslMode(env);
+  const priorityMode = (deps.platform || process.platform) === "win32" && ["native-first", "wsl-first"].includes(mode);
+  const selection = deps.selection || deps.cursors?.zcodeInstallSelection;
+  if (priorityMode && selection?.mode === mode &&
+      selection.zcodeHome === (env.ZCODE_HOME?.trim() || null) &&
+      typeof selection.dbPath === "string" && selection.dbPath) {
+    // A newly discovered or temporarily unavailable install must not change
+    // the cursor's owner. Only an explicit mode/home override releases it.
+    return { native: selection.dbPath, wsl: null };
+  }
+  const paths = resolveInstallPaths({ nativeValue, wslValue }, env, deps);
+  if (!priorityMode || (!selection && hasZcodeCursorState(deps.cursors))) {
+    // Legacy cursors followed the original install resolver. Keep that choice
+    // rather than feeding another database into an already-owned flat ledger.
+    return paths;
+  }
+  const picked = paths.native || paths.wsl;
+  const alternate = picked === nativeValue ? wslValue : nativeValue;
+  if (picked && alternate && zcodeDbHasContent(picked) === false && zcodeDbHasContent(alternate) === true) {
+    return { native: alternate, wsl: null };
+  }
+  return paths;
+}
+
 function buildZcodeNativeUsageSql({ hasSessionDirectory }) {
   const directorySelect = hasSessionDirectory ? ", s.directory AS directory" : "";
   const directoryJoin = hasSessionDirectory
@@ -5552,7 +5661,13 @@ function buildZcodeNativeUsageSql({ hasSessionDirectory }) {
     ORDER BY mu.started_at ASC, mu.id ASC`;
 }
 
-function readZcodeNativeUsageMessages(dbPath, sqliteOptions = {}) {
+// `propagateReadFailure` (off by default): when the native usage layout is
+// present but its row query fails, throw instead of returning null. The usage
+// queue treats that fallthrough as "no native table, use legacy" — correct for
+// its own resilience — but the session scanner must not cache a zero-token
+// inventory over a failed read (the browser then hides the sessions entirely
+// instead of reporting the db as skipped).
+function readZcodeNativeUsageMessages(dbPath, sqliteOptions = {}, { propagateReadFailure = false } = {}) {
   let snapshot = null;
   let effectiveDbPath = dbPath;
   if (isUncPath(dbPath)) {
@@ -5567,7 +5682,7 @@ function readZcodeNativeUsageMessages(dbPath, sqliteOptions = {}) {
 
   let rows;
   try {
-    const layout = detectZcodeNativeUsageLayout(effectiveDbPath, sqliteOptions);
+    const layout = detectZcodeNativeUsageLayout(effectiveDbPath, sqliteOptions, { propagateReadFailure });
     if (!layout) return null;
     rows = readSqliteJsonRows(effectiveDbPath, buildZcodeNativeUsageSql(layout), {
       label: "ZCode",
@@ -5576,7 +5691,8 @@ function readZcodeNativeUsageMessages(dbPath, sqliteOptions = {}) {
       ...sqliteOptions,
       throwOnReadFailure: true,
     });
-  } catch (_error) {
+  } catch (error) {
+    if (propagateReadFailure) throw error;
     return null;
   } finally {
     if (snapshot) snapshot.cleanup();
@@ -5628,10 +5744,10 @@ function readZcodeNativeUsageMessages(dbPath, sqliteOptions = {}) {
 // table is authoritative from its first completed row onward, but it is not a
 // historical backfill. Keep legacy rows before that boundary so merely adding
 // the new table cannot make older usage disappear from TokenTracker.
-function readZcodeDbMessages(dbPath, sqliteOptions = {}) {
+function readZcodeDbMessages(dbPath, sqliteOptions = {}, { propagateReadFailure = false } = {}) {
   if (!dbPath || !fssync.existsSync(dbPath)) return [];
-  const nativeMessages = readZcodeNativeUsageMessages(dbPath, sqliteOptions);
-  const legacyMessages = readOpencodeDbMessages(dbPath, sqliteOptions)
+  const nativeMessages = readZcodeNativeUsageMessages(dbPath, sqliteOptions, { propagateReadFailure });
+  const legacyMessages = readOpencodeDbMessages(dbPath, sqliteOptions, { propagateReadFailure })
     .filter((message) => isZcodeNativeMessage(message.data))
     .map(normalizeZcodeLegacyMessage);
   if (nativeMessages === null) return legacyMessages;
@@ -24595,7 +24711,12 @@ module.exports = {
   readOpencodeDbMessagesIncremental,
   readMimoDbMessages,
   readZcodeDbMessages,
+  coerceEpochMs,
+  normalizeOpencodeModelFields,
   hasZcodeNativeUsageSchema,
+  zcodeDbHasContent,
+  hasZcodeCursorState,
+  resolveZcodeInstallPaths,
   resolveQoderDbPath,
   resolveQoderDbPaths,
   resolveQoderCnDbPaths,
@@ -24629,6 +24750,7 @@ module.exports = {
   parseGeminiIncremental,
   parseOpencodeIncremental,
   parseOpencodeDbIncremental,
+  deriveOpencodeMessageFingerprint,
   parseQoderDbIncremental,
   openclawCursorKey,
   parseOpenclawIncremental,

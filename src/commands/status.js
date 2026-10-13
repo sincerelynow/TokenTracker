@@ -3,6 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const pkg = require("../../package.json");
+const { resolveDumateDbPaths } = require("../lib/dumate");
 
 const { readJson } = require("../lib/fs");
 const { readCursorStateSummary } = require("../lib/cursor-store");
@@ -105,6 +106,7 @@ const {
   resolveCopilotAppDbPath,
   resolveCopilotAppDbPaths,
   probeWslDistros,
+  resolveZcodeInstallPaths,
 } = require("../lib/rollout");
 const {
   TRAE_CN_USAGE_ENV,
@@ -571,6 +573,10 @@ async function cmdStatus(argv = []) {
   const kiloInstalled = kiloActive.length > 0;
   const kiloDbPath = kiloActive.join(" | ");
 
+  const dumateDbPaths = resolveDumateDbPaths({ home });
+  const dumateInstalled = dumateDbPaths.length > 0;
+  const dumateDbPath = dumateDbPaths.join(" | ");
+
   // Mimo (mimocode — OpenCode-fork SQLite) — passive scan of mimocode.db.
   const mimoNativeValue = resolveMimoNativeDbPath({ home });
   const wslMimoDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
@@ -586,7 +592,10 @@ async function cmdStatus(argv = []) {
   const wslZcodeDir = process.platform === "win32" && wsl.shouldProbeWsl(process.env)
     ? wsl.discoverWslHome(".zcode")
     : null;
-  const zcodePaths = resolveInstallPaths({ nativeValue: zcodeNativeValue, wslValue: wslZcodeDir ? path.join(wslZcodeDir, "cli", "db", "db.sqlite") : null });
+  const zcodePaths = resolveZcodeInstallPaths(
+    { nativeValue: zcodeNativeValue, wslValue: wslZcodeDir ? path.join(wslZcodeDir, "cli", "db", "db.sqlite") : null },
+    process.env, { cursors },
+  );
   const zcodeActive = formatResolvedPaths(zcodePaths);
   const zcodeInstalled = zcodeActive.length > 0;
   const zcodeDbPath = zcodeActive.join(" | ");
@@ -1130,6 +1139,9 @@ async function cmdStatus(argv = []) {
         kilo_cli: kiloInstalled
           ? { installed: true, detail: kiloDbPath }
           : { installed: false },
+        dumate: dumateInstalled
+          ? { installed: true, detail: dumateDbPath }
+          : { installed: false },
         mimo: mimoInstalled
           ? { installed: true, detail: mimoDbPath }
           : { installed: false },
@@ -1325,6 +1337,9 @@ async function cmdStatus(argv = []) {
         : null,
       kiloInstalled
         ? `- Kilo CLI: passive reader (${kiloDbPath})`
+        : null,
+      dumateInstalled
+        ? `- DuMate: passive reader (${dumateDbPath})`
         : null,
       mimoInstalled
         ? `- Mimo: passive reader (${mimoDbPath})`

@@ -343,3 +343,26 @@ test("usage-category-breakdown falls back to codex queue totals when rollout ses
     await fs.promises.rm(tmp, { recursive: true, force: true });
   }
 });
+
+test("async category fallback keeps Codex root selection separate from family and legacy totals", async (t) => {
+  const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-localapi-root-fallback-"));
+  t.after(() => fs.promises.rm(tmp, { recursive: true, force: true }));
+  const restoreHome = withHome(tmp);
+  t.after(restoreHome);
+  const queuePath = path.join(tmp, "queue.jsonl");
+  await writeQueue(queuePath, [
+    ["codex", 10], ["codex-root:primary-12345678", 20],
+    ["codex-root:secondary-87654321", 30], ["dsh-root:primary-12345678", 40],
+  ].map(([source, total]) => ({
+    source, model: "gpt-5.5", hour_start: "2026-05-09T10:00:00.000Z",
+    input_tokens: total, total_tokens: total, conversation_count: 1,
+  })));
+  const endpoint = "/functions/tokentracker-usage-category-breakdown?from=2026-05-09&to=2026-05-09&tz=UTC";
+  const selected = await callEndpoint(queuePath, `${endpoint}&source=codex-root:primary-12345678`);
+  assert.equal(selected.breakdown_status, "queue_fallback");
+  assert.equal(selected.totals.total_tokens, 20);
+  assert.equal(selected.message_count, 1);
+  const family = await callEndpoint(queuePath, `${endpoint}&source=codex`);
+  assert.equal(family.totals.total_tokens, 60);
+  assert.equal(family.message_count, 3);
+});

@@ -48,6 +48,7 @@ internal sealed class DashboardWindow : Window
     private WebView2CompositionControl _webView = CreateWebViewControl();
     private readonly ServerManager _server;
     private bool _coreReady;
+    private WebViewActivity? _activity;
     private bool _backdropEnabled;
     private bool _exiting;
     private bool _oauthInFlight;
@@ -141,10 +142,9 @@ internal sealed class DashboardWindow : Window
             // change (minimise still minimises-to-taskbar) and without Hide(), which broke
             // Win+D restore (the HWND left DWM's minimised-windows list) and tray restore
             // (WindowState stayed Minimized, so ShowDashboard re-fired this handler).
-            _webView.Visibility = (WindowState == WindowState.Minimized)
-                ? Visibility.Collapsed
-                : Visibility.Visible;
+            UpdateWebViewActivity();
         };
+        IsVisibleChanged += (_, _) => UpdateWebViewActivity();
         KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) CloseOrHideForOAuth(); };
         _server.StatusChanged += OnServerStatusChanged;
     }
@@ -378,21 +378,9 @@ internal sealed class DashboardWindow : Window
         // alpha 0 or 255 are supported.
         Environment.SetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "0");
 
-        // Disable Chromium background/occlusion throttling. When the OAuth callback
-        // deep-links back, our app is still in the background (the system browser has
-        // focus), so the dashboard WebView is occluded. WebView2 would otherwise
-        // suspend/throttle its JS — stalling the InsForge SDK's code-exchange and the
-        // SPA's redirect to /dashboard, so the sign-in never completes until (and
-        // unless) the window is brought forward. These flags keep the callback page's
-        // timers + network running while occluded, so login finishes regardless of focus.
-        var options = new CoreWebView2EnvironmentOptions
-        {
-            AdditionalBrowserArguments =
-                "--disable-background-timer-throttling " +
-                "--disable-renderer-backgrounding " +
-                "--disable-backgrounding-occluded-windows",
-        };
-        var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
+        // Use Chromium's normal background throttling. Hidden windows explicitly
+        // sleep; an in-flight native OAuth exchange is exempt from suspension.
+        var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, null);
         await _webView.EnsureCoreWebView2Async(env);
         _coreReady = true;
 
@@ -403,6 +391,10 @@ internal sealed class DashboardWindow : Window
         _webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0, 0, 0, 0);
 
         var core = _webView.CoreWebView2;
+        var view = _webView;
+        _activity = new WebViewActivity(
+            visible => view.Visibility = visible ? Visibility.Visible : Visibility.Collapsed,
+            core.Resume, core.TrySuspendAsync, Log);
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
 
@@ -458,6 +450,7 @@ internal sealed class DashboardWindow : Window
                     CompleteNativeOAuth();
                 }
                 await ApplyNativeChromeAsync();
+                UpdateWebViewActivity();
             }
             catch (Exception ex)
             {
@@ -661,7 +654,11 @@ internal sealed class DashboardWindow : Window
         // ?app=1 → dashboard renders in native-app layout (Clawd companion, native
         // component treatment, transparent root + 28px drag strip), matching macOS.
         NavigateWhenServerReady("/?app=1");
+        UpdateWebViewActivity();
     }
+
+    private void UpdateWebViewActivity() =>
+        _activity?.Update(IsVisible && WindowState != WindowState.Minimized, _oauthInFlight);
 
     public void PushPetSettings(bool visible, string size, string character, string botColor)
     {
@@ -688,6 +685,8 @@ internal sealed class DashboardWindow : Window
     private void ReplaceWebViewControl()
     {
         if (_exiting) return;
+        _activity?.Dispose();
+        _activity = null;
         _coreReady = false;
         var old = _webView;
         Content = null;
@@ -942,6 +941,7 @@ internal sealed class DashboardWindow : Window
     private void BeginNativeOAuth()
     {
         _oauthInFlight = true;
+        UpdateWebViewActivity();
         _oauthTimeout?.Cancel();
         _oauthTimeout?.Dispose();
         _oauthTimeout = new CancellationTokenSource();
@@ -995,7 +995,7 @@ internal sealed class DashboardWindow : Window
         _oauthTimeout?.Cancel();
         _oauthTimeout?.Dispose();
         _oauthTimeout = null;
-        if (!IsVisible) CloseOrHideForOAuth();
+        UpdateWebViewActivity();
     }
 
     private void ExpireNativeOAuth()
@@ -1084,11 +1084,11 @@ internal sealed class DashboardWindow : Window
 
     /// <summary>
     /// Read the user's currency choice + USD→currency rate from the dashboard's
-    /// localStorage. Returns ("$", 1) until the WebView is ready or on any failure.
+    /// localStorage. Returns null when the WebView cannot supply a current value.
     /// </summary>
-    public async Task<(string Symbol, decimal Rate)> ReadCurrencyAsync()
+    public async Task<(string Symbol, decimal Rate)?> ReadCurrencyAsync()
     {
-        if (!_coreReady) return ("$", 1m);
+        if (!_coreReady) return null;
         try
         {
             var raw = await _webView.CoreWebView2.ExecuteScriptAsync(
@@ -1114,7 +1114,7 @@ internal sealed class DashboardWindow : Window
             }
             return (symbol, rate);
         }
-        catch { return ("$", 1m); }
+        catch { return null; }
     }
 
     /// <summary>
@@ -1191,6 +1191,8 @@ internal sealed class DashboardWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _activity?.Dispose();
+        _activity = null;
         try { HwndSource.FromHwnd(_hwnd)?.RemoveHook(DashboardWndProc); }
         catch { /* the source may already be gone during teardown */ }
         _oauthTimeout?.Cancel();

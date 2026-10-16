@@ -6,6 +6,8 @@ const cp = require("node:child_process");
 const readline = require("node:readline");
 const crypto = require("node:crypto");
 const { functionUrlFor, fetchFunctionResponse } = require("../lib/function-url");
+const { cloudUsageResetBlocksUpload, finishCloudDeviceUsageReset } = require("../lib/cloud-usage-reset");
+const { KIMI_MODEL_REPAIR_KEY, repairKimiModelAttribution } = require("../lib/kimi-model-repair");
 
 const { resolveInstallPaths, resolveZcodeNativeDbPath, resolveMimoNativeDbPath, ensureFlatCursor } = require("../lib/install-resolver");
 const { multiInstallParse, mergeBothFileSources } = require("../lib/multi-install-parser");
@@ -104,6 +106,8 @@ const {
   parseCraftIncremental,
   resolveReasonixTelemetryFiles,
   parseReasonixIncremental,
+  resolveMuseSessionFiles,
+  parseMuseIncremental,
   resolveGrokBuildSessions,
   parseGrokBuildIncremental,
   resolveAntigravityDbPath,
@@ -351,6 +355,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "lmstudio",
   "mimo",
   "minimax-code",
+  "muse",
   "omo",
   "omp",
   "opencode",
@@ -373,6 +378,7 @@ const BACKGROUND_AUTO_SYNC_SOURCES = new Set([
   "acode",
   "codex",
   "every-code",
+  "muse",
   "reasonix",
 ]);
 
@@ -546,7 +552,13 @@ async function cmdSync(argv, context = {}) {
   // Hooks, native publication and detached retries must honor the saved opt-in.
   const requiresCloudSyncPref = opts.auto || opts.background || opts.fromRetry || opts.fromNotify || opts.fromOpenclaw ||
     Boolean(process.env.TOKENTRACKER_LOCAL_SYNC_ATTEMPT_ID);
-  const canUpload = () => !requiresCloudSyncPref || readCloudSyncEnabled(trackerDir);
+  let cloudResetRuntime = null;
+  const canUpload = () => !cloudUsageResetBlocksUpload(trackerDir, {
+    ownerId: process.env.TOKENTRACKER_CLOUD_OWNER_ID,
+    baseUrl: cloudResetRuntime?.baseUrl || process.env.TOKENTRACKER_INSFORGE_BASE_URL,
+    deviceId: process.env.TOKENTRACKER_CLOUD_DEVICE_ID,
+  }) &&
+    (!requiresCloudSyncPref || readCloudSyncEnabled(trackerDir));
 
   await ensureDir(trackerDir);
   if (opts.fromOpenclaw) {
@@ -2502,6 +2514,17 @@ async function cmdSync(argv, context = {}) {
     const kimiWireFiles = sourceAllowed("kimi")
       ? mergeBothFileSources({ resolveFiles: resolveKimiWireFiles, env: process.env })
       : [];
+    const kimiCodeWireFiles = sourceAllowed("kimi-code")
+      ? mergeBothFileSources({ resolveFiles: resolveKimiCodeWireFiles, env: process.env })
+      : [];
+    if (isFullSourceScan && sourceAllowed("kimi") && sourceAllowed("kimi-code")) {
+      await repairKimiModelAttribution({
+        cursors, queuePath, queueStatePath,
+        legacyFiles: kimiWireFiles, officialFiles: kimiCodeWireFiles,
+        parseLegacy: parseKimiIncremental, parseOfficial: parseKimiCodeIncremental,
+        env: process.env,
+      });
+    }
     if (kimiWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code ${renderBar(0)} | buckets 0`);
@@ -2527,9 +2550,6 @@ async function cmdSync(argv, context = {}) {
 
     // ── Kimi Code official (@moonshot-ai/kimi-code, ~/.kimi-code) ──
     let kimiCodeResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
-    const kimiCodeWireFiles = sourceAllowed("kimi-code")
-      ? mergeBothFileSources({ resolveFiles: resolveKimiCodeWireFiles, env: process.env })
-      : [];
     if (kimiCodeWireFiles.length > 0) {
       if (progress?.enabled) {
         progress.start(`Parsing Kimi Code (official) ${renderBar(0)} | buckets 0`);
@@ -2890,6 +2910,25 @@ async function cmdSync(argv, context = {}) {
         });
       } catch (err) {
         warnProviderParseFailure("Reasonix", err, opts);
+      }
+    }
+
+    // Muse Code (Meta) — usage counts from per-session session.jsonl logs.
+    let museResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const museFiles = sourceAllowed("muse")
+      ? mergeBothFileSources({ resolveFiles: resolveMuseSessionFiles, env: process.env })
+      : [];
+    if (museFiles.length > 0) {
+      try {
+        museResult = await parseMuseIncremental({
+          sessionFiles: museFiles,
+          cursors,
+          queuePath,
+          env: process.env,
+          onProgress: makeProviderProgress("Muse"),
+        });
+      } catch (err) {
+        warnProviderParseFailure("Muse", err, opts);
       }
     }
 
@@ -3351,6 +3390,7 @@ async function cmdSync(argv, context = {}) {
       minimaxCodeResult.recordsProcessed +
       craftResult.recordsProcessed +
       reasonixResult.recordsProcessed +
+      museResult.recordsProcessed +
       grokResult.recordsProcessed +
       copilotResult.recordsProcessed +
       lmstudioResult.recordsProcessed +
@@ -3397,6 +3437,7 @@ async function cmdSync(argv, context = {}) {
       minimaxCodeResult.bucketsQueued +
       craftResult.bucketsQueued +
       reasonixResult.bucketsQueued +
+      museResult.bucketsQueued +
       grokResult.bucketsQueued +
       copilotResult.bucketsQueued +
       lmstudioResult.bucketsQueued +
@@ -3428,6 +3469,7 @@ async function cmdSync(argv, context = {}) {
       !codexColdAuditDue &&
       !codexFallbackRetryRan &&
       !grokHookSignalConsumed &&
+      !cursors.migrations?.[KIMI_MODEL_REPAIR_KEY]?.pendingCompaction &&
       !opts.repairGrok;
 
     if (syncDiagnostics) {
@@ -3451,6 +3493,12 @@ async function cmdSync(argv, context = {}) {
       await cursorStore.writeDeferredCodexAuditSyncs(
         deferredCodexAuditSyncs + 1,
       );
+    }
+    if (cursors.migrations?.[KIMI_MODEL_REPAIR_KEY]?.pendingCompaction) {
+      const state = (await readJson(queueStatePath)) || { offset: 0 };
+      await compactPendingQueue({ queuePath, offset: Number(state.offset || 0), minPendingBytes: 0 });
+      cursors.migrations[KIMI_MODEL_REPAIR_KEY].pendingCompaction = false;
+      await cursorStore.commit(cursors);
     }
     if (grokHookSignalConsumed && grokHookSignalPath) {
       await fs.unlink(grokHookSignalPath).catch(() => {});
@@ -3485,6 +3533,7 @@ async function cmdSync(argv, context = {}) {
     const runtime = Object.hasOwn(process.env, "TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN")
       ? { ...resolvedRuntime, deviceToken: resolvedRuntime.configurationError ? null : process.env.TOKENTRACKER_LOCAL_SYNC_DEVICE_TOKEN }
       : resolvedRuntime;
+    cloudResetRuntime = runtime;
 
     let uploadResult = { inserted: 0, skipped: 0 };
     let uploadAttempted = false;
@@ -3665,6 +3714,12 @@ async function cmdSync(argv, context = {}) {
     // and can keep auto retry alive even after cloud sync has drained.
     const pendingBytes = Math.max(0,
       queueSize - getCloudUploadOffset(afterState, uploadIdentity));
+
+    if (pendingBytes === 0 && canUpload() && runtime.deviceToken) {
+      await finishCloudDeviceUsageReset({ trackerDir, ownerId: process.env.TOKENTRACKER_CLOUD_OWNER_ID,
+        baseUrl: runtime.baseUrl, anonKey: runtime.anonKey, deviceToken: runtime.deviceToken,
+        deviceId: process.env.TOKENTRACKER_CLOUD_DEVICE_ID });
+    }
 
     if (pendingBytes <= 0 || !canUpload()) {
       await clearAutoRetry(trackerDir);

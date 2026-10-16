@@ -36,8 +36,10 @@ test("diagnostics redacts device token and home paths", async () => {
       path.join(trackerDir, "config.json"),
       JSON.stringify(
         {
-          baseUrl: "https://example.invalid",
+          baseUrl: "https://personal-cloud.example",
+          anonKey: "anon_" + "a".repeat(40),
           deviceToken: secret,
+          deviceTokenBaseUrl: "https://personal-cloud.example",
           deviceId: "11111111-1111-1111-1111-111111111111",
           installedAt: "2025-12-19T00:00:00.000Z",
         },

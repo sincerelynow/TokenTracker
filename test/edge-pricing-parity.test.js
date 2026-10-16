@@ -388,6 +388,12 @@ for (const name of [CANONICAL, ...MIRRORS]) {
         assert.equal(localCost(row), expected, `local: ${model} matches edge pricing`);
         const omo = { ...row, source: "omo", reasoning_output_tokens: 10 };
         assert.equal(edgeCost(omo), localCost(omo), `${name}: OmO reasoning remains a subset`);
+        for (const source of ["codex-root:merge-fixture", "muse"]) {
+          const withReasoning = { ...row, source, reasoning_output_tokens: 10 };
+          const withoutReasoning = { ...withReasoning, reasoning_output_tokens: 0 };
+          assert.equal(edgeCost(withReasoning), localCost(withReasoning), `${name}: ${source} matches local cost`);
+          assert.equal(edgeCost(withReasoning), edgeCost(withoutReasoning), `${name}: ${source} reasoning is already in output`);
+        }
         const claude = { ...row, source: "claude", output_tokens: 10, reasoning_output_tokens: 10 };
         assert.equal(edgeCost(claude), localCost(claude), `${name}: Claude reasoning remains disjoint`);
       }

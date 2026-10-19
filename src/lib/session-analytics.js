@@ -96,7 +96,8 @@ const {
 // v24 keeps OpenCode usage dates at event time and fork history on its ancestor.
 // v25 combines fork root identity and cache invalidation with upstream database sessions.
 // v26 adds Kimi wire sessions while preserving Codex root cache identity.
-const SIDECAR_VERSION = 26;
+// v27 discovers compressed Codex archives while preserving ordered root ownership.
+const SIDECAR_VERSION = 27;
 const EDIT_TOOLS = new Set([
   "apply_patch",
   "edit",
@@ -1971,7 +1972,7 @@ function groupCodexFiles(entries) {
     const filePath = entry?.filePath;
     if (!filePath || seenPaths.has(filePath)) continue;
     seenPaths.add(filePath);
-    const id = path.basename(filePath).match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] || filePath;
+    const id = path.basename(filePath).match(/([0-9a-f-]{36})\.jsonl(?:\.zstd?)?$/i)?.[1] || filePath;
     let group = bySession.get(id);
     if (!group) {
       group = { filePaths: [], instance: entry.instance };

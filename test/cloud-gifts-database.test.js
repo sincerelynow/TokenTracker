@@ -212,6 +212,11 @@ test('expiry and revocation give read grace only to intervals that actually bega
   const old = await user(); await historical(old,new Date(Date.now()-62*86400000).toISOString());
   assert.equal((await member(old)).can_read_cloud,false);
   const active = await user(), result = await redeem(active,(await batch()).codes[0]);
+  // This case requires a nonzero active interval. PGlite can redeem and revoke
+  // within the same clock tick, which correctly grants no historical access.
+  while (Date.now() <= Date.parse(result.gift.starts_at)) {
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
   const revoked = await rpc('cloud_revoke_gift',['sandbox',result.gift.id]);
   assert.deepEqual(await rpc('cloud_revoke_gift',['sandbox',result.gift.id]),revoked);
   state = await member(active); assert.equal(state.status,'expired'); assert.equal(state.can_upload_cloud,false); assert.equal(state.can_read_cloud,true);

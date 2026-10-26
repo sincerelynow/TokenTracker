@@ -117,7 +117,7 @@ brew install xiufengsun/tokentracker/tokentracker
 - 📊 **漂亮的 Dashboard** —— 用量趋势、按模型的成本分解、GitHub 风格活跃度热力图、按项目归因
 - 🖥️ **原生桌面 App** —— macOS 菜单栏（含桌面小组件）与 Windows 系统托盘，各自内嵌服务 + 原生 WebView Dashboard
 - 🎨 **4 种桌面小组件** —— 用量 / 热力图 / 热门模型 / 使用限额 直接钉桌面
-- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN / Command Code / Ark Coding Plan / Ark Agent Plan / Devin 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
+- 📈 **实时限额追踪** —— Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN / Command Code / Ark Coding Plan / Ark Agent Plan / Devin / WorkBuddy 的配额窗口；本地 provider App 暂时退出时保留 last-good 缓存
 - 🟢 **服务状态页** —— 直接汇总 8 家 provider 官方状态页的实时运行与事故状态
 - 💰 **成本引擎** —— 内置 70+ 模型定价表，精确到 USD
 - 🌐 **可选排行榜** —— 与全球开发者对比；列可拖拽排序，聚焦你关心的 provider（需登录参与）
@@ -240,7 +240,7 @@ brew install xiufengsun/tokentracker/tokentracker
 > - **oh-my-pi** —— 被动会话扫描始终是计费/token 的事实来源（`~/.omp/agent/sessions/**/*.jsonl`）。可从 Dashboard 安装托管的 notify 扩展，以便回合结束后近实时触发同步；同名用户自写扩展绝不会被覆盖或删除。
 > - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**pi**、**Craft Agents**、**Reasonix**、**Muse Code**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**DuMate**、**ZCode**、**Qoder**、**LM Studio**、**Unsloth Studio**、**AnythingLLM Desktop**、**Devin CLI**、**MiniMax Code**、**Claude Science**、**DeepSeek Harness**、**Cline**) —— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）。Copilot App / CLI 的用量按请求读取 `~/.copilot/session-store.db`；`data.db` 只提供一次旧数据迁移基线，并在 store 成为主源后保持仅观察，Chat 扩展和旧版 CLI 继续使用 OTEL。TokenTracker 会协调这些数据源，使重叠请求只统计一次。迁移前无法无损拆分模型的 App/CLI 混合历史会保留为 `github-copilot-legacy` 聚合量，而不会猜测请求模型
 > - **Grok Build 估算说明** —— Grok 当前本地遥测提供 `updates.jsonl` 里的累计 `totalTokens`，但还没有稳定的输入/输出/cache 拆分；`signals.json` 仍作为 `contextTokensUsed` 快照兜底。所以在 Grok 提供按调用粒度的用量明细之前，TokenTracker 对 Grok 成本仍是估算值
-> - **Grok 产品占比** —— Grok 限额卡片仍把共享的每周或每月额度作为主进度条，再列出各产品占同一额度的比例（Grok Build、Cursor、Grok Bot、Imagine，以及账单接口以后返回的新产品）。这些行是同一个上限的拆分，不是各自独立的配额。「剩余」模式下只有主进度条改成剩余百分比，产品行仍显示已用占比。
+> - **Grok 产品占比** —— Grok 限额卡片默认只用一根进度条显示共享的每周或每月额度的总用量。展开卡片（macOS 菜单栏中点击该卡片）后，这根进度条会按产品拆分成多段（Grok Build、聊天、语音、Imagine，以及账单接口返回的其他产品），并在下方用图例列出各产品的占比。这些分段是同一个上限的拆分，不是各自独立的配额，因此这根进度条在「剩余」模式下也始终显示已用百分比。
 >
 > 任何时候都可以用 `tokentracker status` 查看每个集成的状态。如果显示 `skipped`，`detail` 列会解释原因（例如某工具 CLI 不在 `PATH` 上、config 不可读等）。
 >
@@ -261,7 +261,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **本地优先分析** | ✅ | ✅ | ✅ |
 | **原生桌面 App** | ✅ macOS、Windows、Linux | ❌ | ❌ |
 | **桌面小组件** | ✅ 4 个小组件 | ❌ | ❌ |
-| **限额追踪** | ✅ 17 家 provider | 较少（Claude 周期/用量） | 覆盖多个 provider |
+| **限额追踪** | ✅ 18 家 provider | 较少（Claude 周期/用量） | 覆盖多个 provider |
 | **终端数据分析** | 基础 CLI（`status`、`--json`） | 完善的 CLI 报表能力 | 丰富的交互式 TUI 与 CLI |
 | **JSON 导出** | ✅ | ✅ | ✅ |
 | **公开排行榜** | 可选（需主动登录参与） | ❌ | 可选（`submit`） |

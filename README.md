@@ -316,7 +316,7 @@ An Arch `PKGBUILD` for a local pacman install lives in `TokenTrackerLinux/packag
 > - **Cline** — passive session scan only (`~/.cline/data/sessions/<id>/*.messages.json`, Cline CLI v3 / desktop app; the VS Code extension's globalStorage is a separate, older install and is not read). No hook is installed. Per-turn `metrics` are usage deltas where `inputTokens` already contains cache read+write, so only the non-cached remainder is billed. Path overrides, in precedence order: `TOKENTRACKER_CLINE_SESSIONS_DIR`, `TOKENTRACKER_CLINE_DATA_DIR`, `TOKENTRACKER_CLINE_HOME`, then Cline's own `CLINE_SESSION_DATA_DIR`, `CLINE_DATA_DIR`, `CLINE_DIR`.
 > - **Passive readers** (Cursor, Kiro, Hermes, Kimi Code, Copilot, **Grok Build**, **OmO**, **pi**, **Craft Agents**, **Reasonix**, **Muse Code**, **Kilo CLI**, **Kilo Code**, **Roo Code**, **Antigravity**, **Zed Agent**, **Goose**, **Droid**, **Mimo Code**, **DuMate**, **ZCode**, **Qoder**, **LM Studio**, **Unsloth Studio**, **AnythingLLM Desktop**, **Devin CLI**, **MiniMax Code**, **Claude Science**, **DeepSeek Harness**, **Cline**) — nothing is installed into those tools. We only read files they already produce (SQLite DB, JSONL, OTEL export, session logs). Copilot App / CLI usage is read per request from `~/.copilot/session-store.db`; `data.db` provides the one-time legacy adoption baseline and stays observe-only after the store becomes canonical, while the Chat extension and legacy CLI continue using OTEL. TokenTracker coordinates the sources so overlapping requests are counted once. Mixed App/CLI usage that predates adoption is retained as a `github-copilot-legacy` aggregate rather than assigned to a guessed request model.
 > - **Grok Build estimate** — current local telemetry exposes cumulative `updates.jsonl` `totalTokens`, but not a stable prompt/output/cache split; `signals.json` remains a fallback with `contextTokensUsed` snapshots. TokenTracker estimates Grok cost until per-call usage details are available.
-> - **Grok product shares** — the Grok limits card keeps the shared weekly or monthly pool as the headline bar, then lists each product's share of that same pool (Grok Build, Cursor, Grok Bot, Imagine, and any later product the billing API reports). Those rows are shares of one cap, not separate quotas. Remaining mode flips the headline to percent left and leaves each product row as the used share.
+> - **Grok product shares** — the Grok limits card shows the shared weekly or monthly pool as one bar with the total used. Expand the card (click it in the macOS menu bar) to split that bar into one slice per product (Grok Build, Chat, Voice, Imagine, and any other product the billing API reports), with a legend of each product's share. The slices are shares of one cap, not separate quotas, so this bar always shows percent used, even in Remaining mode.
 >
 > Run `tokentracker status` anytime to verify every integration's state. If something shows `skipped`, the `detail` column explains why (e.g. tool CLI not on `PATH`, config unreadable).
 >
@@ -337,7 +337,7 @@ Missing your tool? [Open an issue](https://github.com/xiufengsun/TokenTracker/is
 | **Local analysis** | ✅ | ✅ | ✅ |
 | **Native desktop apps** | ✅ macOS, Windows, Linux | ❌ | ❌ |
 | **Desktop widgets** | ✅ 4 widgets | ❌ | ❌ |
-| **Rate-limit tracking** | ✅ 17 providers | Limited (Claude blocks) | Multiple providers |
+| **Rate-limit tracking** | ✅ 18 providers | Limited (Claude blocks) | Multiple providers |
 | **Terminal analytics** | Basic CLI (`status`, `--json`) | Strong CLI reporting | Interactive TUI & CLI |
 | **JSON export** | ✅ | ✅ | ✅ |
 | **Public leaderboard** | Optional (opt-in) | ❌ | Optional (`submit`) |
@@ -406,6 +406,14 @@ Most users never need this — defaults are sensible. For advanced setups:
 | `TOKENTRACKER_DEVIN_DB` | Override the Devin CLI database file used by the passive usage reader | `$XDG_DATA_HOME/devin/cli/sessions.db` |
 | `TOKENTRACKER_MINIMAX_HOME` | Override the MiniMax Code data directory used by the passive usage reader | `~/.minimax` |
 | `TOKENTRACKER_COMMANDCODE_HOME` | Override the Command Code (`cmd`) data directory used by the passive session reader | `~/.commandcode` |
+
+### Offline usage transfer
+
+In the local dashboard, open **Settings → App → Local data**. Export usage on one computer, then select that JSON file on another computer, review the preview and confirm the merge. Imported computers appear in the dashboard's existing device selector and device distribution card. You can remove an imported source from the same settings page.
+
+Preview totals and device contributions follow the dashboard's current display metric; the original counters remain in the snapshot. Context breakdown is available with this device selected. Project, session and outcome analyses remain local to this computer, with a scope notice when offline sources are present.
+
+A newer complete snapshot replaces that computer's previous snapshot; importing the same file again does not add usage. Exports contain only this computer's retained device-level history, including token counts, tools, models, time buckets and its device label. They exclude imported sources, credentials, prompts, project/session data, and account-level Cursor/TRAE CN usage. Imported snapshots stay local and never enter the cloud upload queue. Transfer files only between computers with independent histories: copied sessions cannot be deduplicated from aggregated usage. Legacy `tokentracker-sync` synthetic queues require separate migration. Files are limited to 5 MiB, with up to 32 imported computers.
 
 ### 🐧 Windows Subsystem for Linux (WSL) Auto-Discovery
 

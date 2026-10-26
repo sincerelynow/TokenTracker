@@ -115,7 +115,7 @@ brew install xiufengsun/tokentracker/tokentracker
 - 📊 **美しいダッシュボード** — 使用トレンド、モデル別コスト内訳、GitHub スタイルのアクティビティヒートマップ、プロジェクト別の帰属表示
 - 🖥️ **ネイティブデスクトップアプリ** — macOS メニューバー（ウィジェット付き）と Windows システムトレイ。それぞれ組み込みサーバーとネイティブ WebView のダッシュボードを備えます
 - 🎨 **4 種類のデスクトップウィジェット** — Pin Usage / Activity Heatmap / Top Models / Usage Limits をデスクトップに固定
-- 📈 **リアルタイムの利用上限** — Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN / Command Code / Ark Coding Plan / Ark Agent Plan / Devin の上限を表示し、ローカル provider アプリが一時的に終了しても last-good キャッシュを保持
+- 📈 **リアルタイムの利用上限** — Claude / Codex / Cursor / Gemini / Kimi / Kiro / Grok / Copilot / Antigravity / ZCode / OpenCode Go / Qoder / Qoder CN / Command Code / Ark Coding Plan / Ark Agent Plan / Devin / WorkBuddy の上限を表示し、ローカル provider アプリが一時的に終了しても last-good キャッシュを保持
 - 🟢 **サービス状況ページ** — 8 つの公式 provider ステータスページから稼働状況と障害情報を表示
 - 💰 **コストエンジン** — [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) 経由で 2,200+ モデルの価格設定（毎日自動更新）に加え、ニッチなツール（Kiro、Cursor Composer、Kimi、CodeBuddy hy3）向けに厳選された上書き設定。24 時間のディスクキャッシュ + 同梱のオフラインスナップショットにより、ネット接続なしでも正確な USD 表示が可能です。ベンダーが公式価格を公開していないモデル（例: Tencent hy3-preview）はトークン数のみ追跡され、ベンダーが料金を公開するまでコストは $0 と表示されます。
 - 🌐 **オプションのリーダーボード** — 世界中の開発者と比較。ドラッグで列を並び替えて、気になるプロバイダーに絞り込めます（オプトイン制、参加にはサインインが必要）
@@ -237,7 +237,7 @@ brew install xiufengsun/tokentracker/tokentracker
 > - **プラグインベース**のツール (OpenCode、**OpenClaw**) — プラグインは npm パッケージ内に同梱されています。OpenClaw のセッションプラグインは `~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/` にあり、OpenClaw 自身の CLI でリンクして有効化したうえで、同期を起動するセッション終了イベントを許可するために `hooks.allowConversationAccess=true` を設定します。ダウンロードもドラッグ＆ドロップも不要です。
 > - **パッシブリーダー** (Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**oh-my-pi**、**pi**、**Craft Agents**、**Reasonix**、**Muse Code**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**DuMate**、**ZCode**、**LM Studio**、**Unsloth Studio**、**AnythingLLM Desktop**、**Devin CLI**、**MiniMax Code**、**Claude Science**、**DeepSeek Harness**、**Cline**) — これらのツールには何もインストールしません。ツールがすでに出力しているファイル (SQLite DB、JSONL、OTEL エクスポート、session logs) を読むだけです。Copilot App / CLI の使用量は `~/.copilot/session-store.db` からリクエスト単位で読み取ります。`data.db` は旧データ移行時のベースラインとして一度だけ使い、store が正規ソースになった後は監視専用です。Chat 拡張と旧 CLI は引き続き OTEL を使用し、重複するリクエストは TokenTracker が一度だけ集計します。移行前の混在 App/CLI 履歴でモデルを安全に分離できない残量は、推測したリクエストモデルではなく `github-copilot-legacy` の集計値として保持します。
 > - **Grok Build の推定** — 現在のローカルテレメトリは `updates.jsonl` の累積 `totalTokens` を公開していますが、安定したプロンプト/出力/キャッシュの内訳はありません。`signals.json` は `contextTokensUsed` のスナップショットを使ったフォールバックとして残っています。コールごとの利用詳細が利用可能になるまで、TokenTracker は Grok のコストを推定します。
-> - **Grok の製品別シェア** — Grok の制限カードは、共有の週間または月間プールを見出しバーとして残し、その同じプールに対する各製品の割合（Grok Build、Cursor、Grok Bot、Imagine、および請求 API が後から返す製品）を並べます。これらの行は1つの上限の内訳であり、別々の上限ではありません。「残り」表示では見出しバーだけが残量％になり、製品行は使用済みの割合のままです。
+> - **Grok の製品別シェア** — Grok の制限カードは、共有の週間または月間プールを1本のバーで合計使用量として表示します。カードを展開すると（macOS のメニューバーではカードをクリック）、そのバーが製品ごとのセグメント（Grok Build、チャット、ボイス、Imagine、および請求 API が返すその他の製品）に分かれ、下に各製品の割合を示す凡例が表示されます。セグメントは1つの上限の内訳であり、別々の上限ではないため、このバーは「残り」表示でも常に使用済みの％を表示します。
 >
 > いつでも `tokentracker status` を実行すれば、各統合の状態を確認できます。`skipped` と表示されている場合、`detail` 列にその理由が示されます（例: ツール CLI が `PATH` にない、設定が読めない）。
 >
@@ -258,7 +258,7 @@ brew install xiufengsun/tokentracker/tokentracker
 | **ローカルファースト解析** | ✅ | ✅ | ✅ |
 | **ネイティブデスクトップアプリ** | ✅ macOS, Windows, Linux | ❌ | ❌ |
 | **デスクトップウィジェット** | ✅ 4 種類 | ❌ | ❌ |
-| **レート制限トラッキング** | ✅ 17 プロバイダー | 限定的（Claude の利用枠） | 複数のプロバイダーに対応 |
+| **レート制限トラッキング** | ✅ 18 プロバイダー | 限定的（Claude の利用枠） | 複数のプロバイダーに対応 |
 | **ターミナル分析** | 基本的な CLI（`status`, `--json`） | 充実した CLI レポート | リッチな対話型 TUI & CLI |
 | **JSON エクスポート** | ✅ | ✅ | ✅ |
 | **公開リーダーボード** | 任意（オプトイン） | ❌ | 任意（`submit`） |

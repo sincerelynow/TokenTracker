@@ -232,6 +232,7 @@ export function UsageOverview({
   to,
   deviceOptions = [],
   selectedDevice = "",
+  dataRevision = 0,
   onDeviceChange,
 }) {
   const tabs = normalizePeriods(periods);
@@ -293,7 +294,7 @@ export function UsageOverview({
   // stays an explicit user action rather than a forced default.
   useEffect(() => {
     setExpandedProvider(null);
-  }, [period, from, to, selectedDevice]);
+  }, [period, from, to, selectedDevice, dataRevision]);
 
   const handleTablistKeyDown = (event) => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -696,6 +697,7 @@ export function UsageOverview({
                         providerHeading={providerHeading}
                         contextSource={contextSource}
                         contextRequestSource={provider.isSyntheticAggregate ? String(provider.source).replace(/-all$/i, "") : provider.source}
+                        deviceId={selectedDevice}
                         from={from}
                         to={to}
                         sortedModels={sortedModels}
@@ -905,7 +907,7 @@ function KiroEstimateNotice() {
 // Renders a single expanded provider section. Hosts loading state for the
 // inline Context Breakdown so the spinner can sit next to the heading instead
 // of taking its own row.
-function ProviderExpandedSection({ provider, color, providerHeading, contextSource, contextRequestSource, from, to, sortedModels }) {
+function ProviderExpandedSection({ provider, color, providerHeading, contextSource, contextRequestSource, from, to, sortedModels, deviceId }) {
   const { formatTokens } = useTokenFormat();
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const isAntigravity =
@@ -979,6 +981,7 @@ function ProviderExpandedSection({ provider, color, providerHeading, contextSour
                               to={to}
                               source={contextSource}
                               requestSource={contextRequestSource}
+                              deviceId={deviceId}
                               referenceTotalTokens={provider.usage}
                               onLoadingChange={setBreakdownLoading}
                             />

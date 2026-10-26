@@ -233,9 +233,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // Personal Windows builds have no upstream release channel. Do not schedule
         // launch or periodic checks; legacy Dashboard actions are ignored below.
 
-        // The desktop pet is the app's visible presence now — the dashboard no longer
-        // auto-opens. A stored preference (user toggled the pet at least once) always
-        // wins; only first launches fall back to the show-on-manual-run default.
+        // A stored preference (user toggled the pet at least once) always wins;
+        // only first launches fall back to the show-on-manual-run default.
         // Deferred onto the dispatcher so it shows once the message pump is running.
         _quotaWindow = new QuotaWidgetWindow(_server, OpenDashboard, _widgetWebViewEnvironment);
         _quotaWindow.EnabledChanged += () => { _quotaItem.Checked = _quotaWindow.Enabled; UpdateLimitsPolling(); };
@@ -432,6 +431,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         NativeLocalization.StorePreference(preference);
         ApplyLocaleToMenu();
     }
+
+    public void ActivateDashboard() => PostToUi(OpenDashboard);
 
     private void OpenDashboard()
     {

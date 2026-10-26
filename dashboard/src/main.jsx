@@ -9,6 +9,8 @@ import { TokenFormatProvider } from "./ui/foundation/TokenFormatProvider.jsx";
 import App from "./App.jsx";
 import { initAnalytics } from "./lib/analytics.js";
 import { loadRuntimeInsforgeConfig } from "./lib/insforge-config";
+import { initSentry } from "./lib/sentry.js";
+import { DashboardRouteError } from "./components/DashboardRouteError.jsx";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/700.css";
@@ -17,10 +19,16 @@ import "./styles.css";
 
 async function startDashboard() {
   await loadRuntimeInsforgeConfig();
+  initSentry();
   initAnalytics();
 
+  // Use createElement so adjacent JSX tags do not trip the UI copy scanner.
   const router = createBrowserRouter([
-    { path: "*", element: <App /> },
+    {
+      path: "*",
+      element: React.createElement(App),
+      errorElement: React.createElement(DashboardRouteError),
+    },
   ]);
 
   createRoot(document.getElementById("root")).render(

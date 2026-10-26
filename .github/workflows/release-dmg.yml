@@ -201,6 +201,7 @@ jobs:
         env:
           VITE_INSFORGE_BASE_URL: ${{ vars.TOKENTRACKER_INSFORGE_BASE_URL }}
           VITE_INSFORGE_ANON_KEY: ${{ vars.TOKENTRACKER_INSFORGE_ANON_KEY }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
         run: npm run dashboard:build
 
       # 2. Bundle EmbeddedServer (Node.js + tokentracker source)
@@ -453,6 +454,7 @@ jobs:
           TOKENTRACKER_BUILD_PET: "1"
           VITE_INSFORGE_BASE_URL: ${{ vars.TOKENTRACKER_INSFORGE_BASE_URL }}
           VITE_INSFORGE_ANON_KEY: ${{ vars.TOKENTRACKER_INSFORGE_ANON_KEY }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
         run: npm run dashboard:build
 
       - name: Install Linux client dependencies

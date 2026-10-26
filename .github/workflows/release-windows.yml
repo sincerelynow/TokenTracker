@@ -87,6 +87,7 @@ jobs:
         env:
           VITE_INSFORGE_BASE_URL: ${{ vars.TOKENTRACKER_INSFORGE_BASE_URL }}
           VITE_INSFORGE_ANON_KEY: ${{ vars.TOKENTRACKER_INSFORGE_ANON_KEY }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           # Include the floating-pet entry (pet.html). Off by default so the macOS +
           # web builds stay byte-identical; only the Windows build opts in.
           TOKENTRACKER_BUILD_PET: "1"

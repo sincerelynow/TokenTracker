@@ -239,6 +239,7 @@ brew install xiufengsun/tokentracker/tokentracker
 > - **oh-my-pi** —— 被动会话扫描始终是计费/token 的事实来源（`~/.omp/agent/sessions/**/*.jsonl`）。可从 Dashboard 安装托管的 notify 扩展，以便回合结束后近实时触发同步；同名用户自写扩展绝不会被覆盖或删除。
 > - **被动读取类**（Cursor、Kiro、Hermes、Kimi Code、Copilot、**Grok Build**、**pi**、**Craft Agents**、**Reasonix**、**Muse Code**、**Kilo CLI**、**Kilo Code**、**Roo Code**、**Antigravity**、**Zed Agent**、**Goose**、**Droid**、**Mimo Code**、**DuMate**、**ZCode**、**Qoder**、**LM Studio**、**Unsloth Studio**、**AnythingLLM Desktop**、**Devin CLI**、**MiniMax Code**、**Claude Science**、**DeepSeek Harness**、**Cline**) —— 完全不往它们里面塞东西，只读取它们自己产生的文件（SQLite DB、JSONL、OTEL 导出、会话轨迹日志）。Copilot App / CLI 的用量按请求读取 `~/.copilot/session-store.db`；`data.db` 只提供一次旧数据迁移基线，并在 store 成为主源后保持仅观察，Chat 扩展和旧版 CLI 继续使用 OTEL。TokenTracker 会协调这些数据源，使重叠请求只统计一次。迁移前无法无损拆分模型的 App/CLI 混合历史会保留为 `github-copilot-legacy` 聚合量，而不会猜测请求模型
 > - **Grok Build 估算说明** —— Grok 当前本地遥测提供 `updates.jsonl` 里的累计 `totalTokens`，但还没有稳定的输入/输出/cache 拆分；`signals.json` 仍作为 `contextTokensUsed` 快照兜底。所以在 Grok 提供按调用粒度的用量明细之前，TokenTracker 对 Grok 成本仍是估算值
+> - **Grok 产品占比** —— Grok 限额卡片仍把共享的每周或每月额度作为主进度条，再列出各产品占同一额度的比例（Grok Build、Cursor、Grok Bot、Imagine，以及账单接口以后返回的新产品）。这些行是同一个上限的拆分，不是各自独立的配额。「剩余」模式下只有主进度条改成剩余百分比，产品行仍显示已用占比。
 >
 > 任何时候都可以用 `tokentracker status` 查看每个集成的状态。如果显示 `skipped`，`detail` 列会解释原因（例如某工具 CLI 不在 `PATH` 上、config 不可读等）。
 >
@@ -300,7 +301,7 @@ TokenTracker 在本地处理你的用量数据。绝不收集或上传 prompt、
 | **不收集代码与 Prompt** | TokenTracker 解析本地日志文件中的 token 数量与时间戳。Prompt、回复正文、代码和对话内容绝不保存或上传。 |
 | **默认本地优先** | 用量追踪完全跑在你的本地机器上。无需账号、登录或 API Key。云端同步与公开排行榜完全属于自选（Opt-in）。 |
 | **可公开审计** | 完全开源。欢迎查阅 [`src/lib/rollout.js`](src/lib/rollout.js) —— 仅提取数字、时间戳与模型名称。 |
-| **透明的网络请求** | 完整披露于[隐私政策](docs/PRIVACY.md)。默认发起的网络请求仅限于：直接查询 provider 配额（使用你机器上已有的本地凭证）、获取 GitHub Star 数与检查更新、更新定价数据（`raw.githubusercontent.com`），以及匿名产品遥测（每日一次心跳和 PostHog 页面访问，均可通过 `TOKENTRACKER_NO_TELEMETRY=1` 或 `DO_NOT_TRACK=1` 关闭）。遥测绝不包含 token、模型名、prompt 或代码。 |
+| **透明的网络请求** | 完整披露于[隐私政策](docs/PRIVACY.md)。默认发起的网络请求仅限于：直接查询 provider 配额（使用你机器上已有的本地凭证）、获取 GitHub Star 数与检查更新、更新定价数据（`raw.githubusercontent.com`），以及匿名产品遥测（每日一次心跳、PostHog 页面访问，以及在配置了 DSN 时可选的 Sentry 错误上报——均可通过 `TOKENTRACKER_NO_TELEMETRY=1` 或 `DO_NOT_TRACK=1` 关闭）。遥测绝不包含 token、模型名、prompt 或代码。 |
 
 ---
 

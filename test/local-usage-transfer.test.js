@@ -29,7 +29,13 @@ async function apply(service, snapshot) {
 
 test("offline transfer preserves separate Codex and DSH roots without exporting paths", async (t) => {
   const rows = [
-    row(100, { source: "codex-root:codex-12345678" }),
+    row(100, {
+      source: "codex-root:codex-12345678",
+      ultrafast_input_tokens: 30,
+      ultrafast_output_tokens: 5,
+      ultrafast_long_context_input_tokens: 10,
+      ultrafast_long_context_output_tokens: 2,
+    }),
     row(200, { source: "codex-root:codex-ipc-87654321" }),
     row(300, { source: "dsh-root:dsh-12345678" }),
     row(400, { source: "dsh-root:dsh-alt-87654321" }),
@@ -42,6 +48,7 @@ test("offline transfer preserves separate Codex and DSH roots without exporting 
   await apply(b.service, snapshot);
   await apply(b.service, snapshot);
   assert.equal(total(await b.service.view([])), 1000);
+  assert.deepEqual(await b.service.view([], "local:machine-aaaa"), rows);
   assert.deepEqual((await b.service.view([], "local:machine-aaaa")).map((r) => r.source), rows.map((r) => r.source));
   for (const source of ["codex-root:", "dsh-root:../private", "other:root", "codex-root:UPPER"] ) {
     const bad = structuredClone(snapshot);
@@ -293,4 +300,29 @@ test("real local API previews and commits imports, filters existing usage endpoi
   assert.equal((await context("local:machine-aaaa")).reason, "local_history_only");
   assert.equal((await context()).reason, "local_history_only");
   assert.equal((await context("local:machine-bbbb")).totals.total_tokens, 200);
+});
+
+test("export/import preserves ultrafast and ultrafast_long_context subsets (issue 886)", async (t) => {
+  const a = await machine(t, "machine-aaaa", [row(200, {
+    ultrafast_input_tokens: 150,
+    ultrafast_output_tokens: 50,
+    ultrafast_cached_input_tokens: 0,
+    ultrafast_cache_creation_input_tokens: 0,
+    ultrafast_reasoning_output_tokens: 0,
+    ultrafast_long_context_input_tokens: 40,
+    ultrafast_long_context_output_tokens: 10,
+    ultrafast_long_context_cached_input_tokens: 0,
+    ultrafast_long_context_cache_creation_input_tokens: 0,
+    ultrafast_long_context_reasoning_output_tokens: 0,
+  })]);
+  const b = await machine(t, "machine-bbbb", [row(10)]);
+  const snapshot = await a.service.exportSnapshot();
+  assert.equal(snapshot.rows[0].ultrafast_input_tokens, 150);
+  assert.equal(snapshot.rows[0].ultrafast_output_tokens, 50);
+  assert.equal(snapshot.rows[0].ultrafast_long_context_input_tokens, 40);
+  assert.equal(snapshot.rows[0].ultrafast_long_context_output_tokens, 10);
+  await apply(b.service, snapshot);
+  const viewed = await b.service.view([row(10)], "local:machine-aaaa");
+  assert.equal(viewed[0].ultrafast_input_tokens, 150);
+  assert.equal(viewed[0].ultrafast_long_context_input_tokens, 40);
 });

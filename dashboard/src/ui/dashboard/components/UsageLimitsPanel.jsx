@@ -1,6 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, Gift, Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
-import { Card } from "../../components";
+import { AlertCircle, ChevronDown, Gift, Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy, getCopyLocale } from "../../../lib/copy";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
@@ -103,10 +102,10 @@ function formatCreditAmount(
   }).format(n);
 }
 
-function buildQuotaDetail(window) {
+function buildQuotaDetail(window, maximumFractionDigits) {
   if (!window || typeof window !== "object") return null;
   if (!(Number(window.limit_credits) > 0)) return null;
-  const formatOptions = { useGrouping: window.unit !== "calls" };
+  const formatOptions = { useGrouping: window.unit !== "calls", maximumFractionDigits };
   const used = formatCreditAmount(window.used_credits, formatOptions);
   const limit = formatCreditAmount(window.limit_credits, formatOptions);
   const remaining = formatCreditAmount(window.remaining_credits, formatOptions);
@@ -152,7 +151,7 @@ function buildWindowHoverDetail(spec, pace, mode) {
   if (exact) {
     lines.push(copy(spec.timeKind === "expiry" ? "limits.hover.expires_at" : "limits.hover.resets_at", { time: exact }));
   }
-  const quota = buildQuotaDetail(spec.window);
+  const quota = buildQuotaDetail(spec.window, spec.creditPrecision);
   if (quota) lines.push(quota);
   return lines.join("\n");
 }
@@ -160,11 +159,35 @@ function buildWindowHoverDetail(spec, pace, mode) {
 // Shared with the session browser; see ui/components/HoverTooltip.jsx.
 const Tooltip = HoverTooltip;
 
-function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePercent = null, paceOver = false, title = null, share = false }) {
+// Slices of a segmented pool bar share the pool's threshold hue and fade per
+// product in API order, like grok.com's usage bar.
+const SEGMENT_OPACITIES = [1, 0.65, 0.45, 0.3, 0.2];
+
+function segmentOpacity(index) {
+  return SEGMENT_OPACITIES[Math.min(index, SEGMENT_OPACITIES.length - 1)];
+}
+
+function PaceMarker({ paceX, paceOver }) {
+  return (
+    <>
+      {/* Notch: a slice of bare track that "cuts" the fill, so the mark reads
+          as a marker and stays visible even over a same-colored fill. */}
+      <div
+        className="absolute top-0 h-full bg-oai-gray-100 dark:bg-oai-gray-700/50"
+        style={{ left: `calc(${paceX}% - 3px)`, width: "6px" }}
+      />
+      <div
+        className={`absolute top-0 h-full ${paceOver ? "bg-red-500" : "bg-emerald-500"}`}
+        style={{ left: `calc(${paceX}% - 1px)`, width: "2px" }}
+      />
+    </>
+  );
+}
+
+function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePercent = null, paceOver = false, title = null, segments = null }) {
   const rawUsed = Math.max(0, Math.min(100, Number(pct) || 0));
-  // A product share is points of the pool, not a quota that fills at 100%.
-  const displayPct = !share && mode === LIMIT_DISPLAY_MODES.REMAINING ? 100 - rawUsed : rawUsed;
-  const colorMode = share ? LIMIT_DISPLAY_MODES.USED : mode;
+  const displayPct = mode === LIMIT_DISPLAY_MODES.REMAINING ? 100 - rawUsed : rawUsed;
+  const fillColor = barColor(displayPct, mode);
   const rounded = Math.round(displayPct);
   // Sub-1% still matters (e.g. team pool); keep bar/text from collapsing to 0%.
   const widthPct = displayPct > 0 && rounded === 0 ? Math.max(displayPct, 0.35) : displayPct;
@@ -173,42 +196,75 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePerc
     labelPct = copy("limits.bar.sub_one_percent");
   }
   const paceX = pacePercent == null ? null : Math.max(0, Math.min(100, pacePercent));
+  const segmentWeights = segments?.map((segment) => Math.max(0, Math.min(100, Number(segment.pct) || 0)));
+  const segmentTotal = segmentWeights?.reduce((sum, pct) => { return sum + pct; }, 0) || 0;
+  const unallocatedUsedWeight = segments ? Math.max(0, rawUsed - segmentTotal) : 0;
+  const remainingWeight = Math.max(0, 100 - segmentTotal - unallocatedUsedWeight);
   return (
     <div className="group relative flex items-center gap-2">
       <Tooltip text={title} />
       <span
         data-limit-label=""
-        className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
+        className="text-xs sm:text-sm text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
         style={{ width: "var(--tt-limits-label-w)" }}
       >
         {label}
       </span>
-      <div className="relative flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
-        <div
-          className={`${barColor(displayPct, colorMode)} rounded-full h-full transition-[width] duration-500 ease-out`}
-          style={{ width: `${widthPct}%`, minWidth: displayPct > 0 ? "3px" : 0 }}
-        />
-        {paceX != null && (
-          <>
-            {/* Notch: a slice of bare track that "cuts" the fill, so the mark reads
-                as a marker and stays visible even over a same-colored fill. */}
+      {segments ? (
+        <div data-limit-segments="" className="relative flex min-w-0 flex-1 h-1.5 overflow-hidden" style={{ gap: "min(2px, 1%)" }}>
+          {segments.map((segment, index) => (
             <div
-              className="absolute top-0 h-full bg-oai-gray-100 dark:bg-oai-gray-700/50"
-              style={{ left: `calc(${paceX}% - 3px)`, width: "6px" }}
+              key={segment.key}
+              data-limit-segment={segment.key}
+              className={`${fillColor} min-w-0 rounded-full h-full transition-[flex-grow] duration-500 ease-out`}
+              style={{
+                flex: `${segmentWeights[index]} 1 0px`,
+                opacity: segmentOpacity(index),
+              }}
             />
-            <div
-              className={`absolute top-0 h-full ${paceOver ? "bg-red-500" : "bg-emerald-500"}`}
-              style={{ left: `calc(${paceX}% - 1px)`, width: "2px" }}
-            />
-          </>
-        )}
-      </div>
-      <span className="text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400 w-9 text-right shrink-0 whitespace-nowrap">
+          ))}
+          {unallocatedUsedWeight ? <div data-limit-unallocated-used="" className={`${fillColor} min-w-0 rounded-full h-full`} style={{ flex: `${unallocatedUsedWeight} 1 0px`, opacity: segmentOpacity(segments.length) }} /> : null}
+          {remainingWeight ? <div data-limit-remainder="" className="min-w-0 rounded-full h-full bg-oai-gray-100 dark:bg-oai-gray-700/50" style={{ flex: `${remainingWeight} 1 0px` }} /> : null}
+          {paceX != null && <PaceMarker paceX={paceX} paceOver={paceOver} />}
+        </div>
+      ) : (
+        <div className="relative min-w-0 flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
+          <div
+            className={`${fillColor} rounded-full h-full transition-[width] duration-500 ease-out`}
+            style={{ width: `${widthPct}%`, minWidth: displayPct > 0 ? "3px" : 0 }}
+          />
+          {paceX != null && <PaceMarker paceX={paceX} paceOver={paceOver} />}
+        </div>
+      )}
+      <span className="text-xs sm:text-sm tabular-nums text-oai-gray-600 dark:text-oai-gray-300 w-11 text-right shrink-0 whitespace-nowrap">
         {labelPct}%
       </span>
       {reset && (
-        <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-500 w-6 text-right shrink-0">{reset}</span>
+        <span className="text-xs tabular-nums text-oai-gray-400 dark:text-oai-gray-500 w-8 text-right shrink-0">{reset}</span>
       )}
+    </div>
+  );
+}
+
+/** Dot + name + share for each slice of a segmented bar, aligned under the bar. */
+function LimitSegmentLegend({ segments, fillColor }) {
+  return (
+    <div
+      data-limit-legend=""
+      className="-mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] leading-snug"
+      style={{ paddingLeft: "calc(var(--tt-limits-label-w, 0px) + 0.5rem)" }}
+    >
+      {segments.map((segment, index) => (
+        <span key={segment.key} className="inline-flex items-center gap-1 whitespace-nowrap">
+          <span
+            aria-hidden
+            className={`${fillColor} inline-block h-1.5 w-1.5 shrink-0 rounded-full`}
+            style={{ opacity: segmentOpacity(index) }}
+          />
+          <span className="text-oai-gray-500 dark:text-oai-gray-400">{segment.label ?? copy(segment.labelKey)}</span>
+          <span className="tabular-nums text-oai-gray-700 dark:text-oai-gray-200">{formatPercentValue(segment.pct)}%</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -219,8 +275,8 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePerc
  */
 function explainLineFor(spec, pace, mode) {
   const label = spec.label ?? copy(spec.labelKey);
-  // Remaining mode flips a real quota to "how much is left". A product share stays the used percent.
-  const remaining = mode === LIMIT_DISPLAY_MODES.REMAINING && spec.share !== true;
+  // In remaining mode every percentage flips to "how much is left".
+  const remaining = mode === LIMIT_DISPLAY_MODES.REMAINING;
   const projection = (usedPct) => (remaining ? 100 - usedPct : usedPct);
   // No trusted window length (monthly / billing cycle): just the usage.
   if (pace.expectedPercent == null) {
@@ -244,24 +300,32 @@ function rowHasPaceMarker({ pace }) {
   return pace.pacePercent != null;
 }
 
+/** The footnote explains the pace marker, so it follows the rows that draw one. */
+function paceFootnoteRemaining(rows, mode) {
+  return rows.some((row) => rowHasPaceMarker(row) && (row.mode ?? mode) === LIMIT_DISPLAY_MODES.REMAINING);
+}
+
 function LimitDetail({ rows, mode, now = Date.now() }) {
   if (rows.length === 0) return null;
-  const remaining = mode === LIMIT_DISPLAY_MODES.REMAINING;
+  const remaining = paceFootnoteRemaining(rows, mode);
   const hasPaceMarker = rows.some(rowHasPaceMarker);
   // No own background or extra horizontal padding: it sits on the expanded
   // group's tint and lines up flush-left with the bars above.
   return (
     <div className="mt-1 flex flex-col gap-1">
-      {rows.map(({ spec, pace }) => {
+      {rows.map(({ spec, pace, mode: rowMode = mode }) => {
         const exact = formatExactReset(resetToMs(readWindowReset(spec.window, spec.resetField)));
         return (
           <div key={spec.key} className="text-[11px] leading-snug text-oai-gray-600 dark:text-oai-gray-300">
-            {explainLineFor(spec, pace, mode)}
+            {explainLineFor(spec, pace, rowMode)}
             {exact ? (
               <span className="text-oai-gray-400 dark:text-oai-gray-500">
                 {" · "}
                 {copy(spec.timeKind === "expiry" ? "limits.hover.expires_at" : "limits.hover.resets_at", { time: exact })}
               </span>
+            ) : null}
+            {spec.showCreditDetail ? (
+              <div>{buildQuotaDetail(spec.window, spec.creditPrecision)}</div>
             ) : null}
           </div>
         );
@@ -346,58 +410,50 @@ function StatusBadge({ label, age = null, tone = "live", tooltip = null }) {
 function ToolGroup({ name, providerId, children, expandable = false, expanded = false, onToggle, badge = null, rightAdornment = null, toggleOnHeader = false }) {
   const providerKey = limitProviderIconKey(providerId);
   const header = (
-    <div className="flex items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-3">
       {providerKey ? (
-        <ProviderIcon provider={providerKey} size={14} className={LIMITS_PROVIDER_ICON_CLASS} />
+        <ProviderIcon provider={providerKey} size={22} className={LIMITS_PROVIDER_ICON_CLASS} />
       ) : null}
-      <span className="text-sm font-medium text-oai-black dark:text-oai-white">{name}</span>
+      <span className="text-base font-semibold text-oai-black dark:text-oai-white">{name}</span>
       {rightAdornment ? <span className="shrink-0">{rightAdornment}</span> : null}
       {badge}
     </div>
   );
+  const cardClass = "rounded-xl border border-oai-gray-200 bg-white dark:border-oai-gray-800 dark:bg-oai-gray-900";
+  const headerClass = "flex w-full items-center justify-between gap-3 border-b border-oai-gray-200 px-4 py-4 text-left dark:border-oai-gray-800 sm:px-5";
+  const body = <div className="flex flex-col gap-2 px-4 py-4 sm:px-5">{children}</div>;
 
   if (!expandable) {
-    return (
-      <div className="flex flex-col gap-1.5">
-        {header}
-        {children}
-      </div>
-    );
+    return <div className={cardClass}><div className={headerClass}>{header}</div>{body}</div>;
   }
 
   if (toggleOnHeader) {
     return (
-      <div className="flex flex-col gap-1.5">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={onToggle}
-          className="flex w-full items-center justify-between rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
-        >
+      <div className={cardClass}>
+        <button type="button" aria-expanded={expanded} onClick={onToggle}
+          className={`${headerClass} rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500`}>
           {header}
-          <ChevronDown size={13} aria-hidden className={`text-oai-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+          <ChevronDown size={16} aria-hidden className={`shrink-0 text-oai-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
         </button>
-        {children}
+        {body}
       </div>
     );
   }
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-expanded={expanded}
-      onClick={onToggle}
+    <div role="button" tabIndex={0} aria-expanded={expanded} onClick={onToggle}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onToggle?.();
         }
       }}
-      className="flex flex-col gap-1.5 -mx-1.5 px-1.5 py-1 rounded-lg cursor-pointer transition-colors hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/40 aria-expanded:bg-oai-gray-50 dark:aria-expanded:bg-oai-gray-800/40"
-    >
-      {header}
-      {children}
+      className={`${cardClass} cursor-pointer transition-colors hover:border-oai-gray-300 dark:hover:border-oai-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500`}>
+      <div className={headerClass}>
+        {header}
+        <ChevronDown size={16} aria-hidden className={`shrink-0 text-oai-gray-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </div>
+      {body}
     </div>
   );
 }
@@ -450,12 +506,12 @@ function SubscriptionBar({ subscription, now, mode = LIMIT_DISPLAY_MODES.USED })
   return (
     <div className="flex items-center gap-2">
       <span
-        className="text-[11px] text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
+        className="text-xs sm:text-sm text-oai-gray-500 dark:text-oai-gray-400 shrink-0 whitespace-nowrap"
         style={{ width: "var(--tt-limits-label-w)" }}
       >
         {copy("subscriptions.inline.label")}
       </span>
-      <div className="relative flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
+      <div className="relative min-w-0 flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
         <div
           className={`${
             expired ? "bg-red-500" : nearExpiry ? "bg-amber-500" : "bg-blue-500"
@@ -463,11 +519,11 @@ function SubscriptionBar({ subscription, now, mode = LIMIT_DISPLAY_MODES.USED })
           style={{ width: `${renderWidth}%`, minWidth: renderWidth > 0 ? "3px" : 0 }}
         />
       </div>
-      <span className="text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400 w-9 text-right shrink-0 whitespace-nowrap">
+      <span className="text-xs sm:text-sm tabular-nums text-oai-gray-600 dark:text-oai-gray-300 w-11 text-right shrink-0 whitespace-nowrap">
         {labelPct}
       </span>
       <span
-        className={`text-[10px] tabular-nums shrink-0 whitespace-nowrap w-6 text-right ${
+        className={`text-xs tabular-nums shrink-0 whitespace-nowrap w-8 text-right ${
           expired ? "text-oai-error" : "text-oai-gray-400 dark:text-oai-gray-500"
         }`}
       >
@@ -517,30 +573,44 @@ function SubscriptionDetail({ subscription, now }) {
 const DEFAULT_ORDER = LIMIT_PROVIDER_IDS;
 
 function StatusLine({ children, tone = "neutral" }) {
-  const color =
-    tone === "error"
-      ? "text-red-600 dark:text-red-400"
-      : "text-oai-gray-500 dark:text-oai-gray-400";
-  return <div className={`text-[11px] leading-snug ${color}`}>{children}</div>;
+  if (tone === "error") {
+    return (
+      <div className="flex items-start gap-2 text-xs leading-relaxed text-oai-gray-600 dark:text-oai-gray-300">
+        <AlertCircle size={15} aria-hidden className="mt-0.5 shrink-0 text-red-500 dark:text-red-400" />
+        <span className="min-w-0 break-words">{children}</span>
+      </div>
+    );
+  }
+  return <div className="text-[11px] leading-snug text-oai-gray-500 dark:text-oai-gray-400">{children}</div>;
 }
 
-function LimitWindowSection({ rows, mode, extra = null }) {
+function LimitWindowSection({ rows, mode, extra = null, expanded = false }) {
   const showEmpty = rows.length === 0 && !extra;
   return (
     <>
-      {rows.map(({ spec, pace }) => (
-        <LimitBar
-          key={spec.key}
-          label={spec.label ?? copy(spec.labelKey)}
-          pct={readWindowPct(spec.window, spec.pctField)}
-          reset={formatReset(readWindowReset(spec.window, spec.resetField))}
-          mode={mode}
-          share={spec.share === true}
-          pacePercent={pace.pacePercent}
-          paceOver={pace.paceOver}
-          title={buildWindowHoverDetail(spec, pace, mode)}
-        />
-      ))}
+      {rows.map(({ spec, pace, mode: rowMode = mode }) => {
+        const pct = readWindowPct(spec.window, spec.pctField);
+        // The per-product split is detail: collapsed shows the whole pool,
+        // expanding the group splits the bar and adds the legend.
+        const segments = expanded ? spec.segments : null;
+        return (
+          <React.Fragment key={spec.key}>
+            <LimitBar
+              label={spec.label ?? copy(spec.labelKey)}
+              pct={pct}
+              reset={formatReset(readWindowReset(spec.window, spec.resetField))}
+              mode={rowMode}
+              segments={segments}
+              pacePercent={pace.pacePercent}
+              paceOver={pace.paceOver}
+              title={buildWindowHoverDetail(spec, pace, rowMode)}
+            />
+            {segments ? (
+              <LimitSegmentLegend segments={segments} fillColor={barColor(pct, LIMIT_DISPLAY_MODES.USED)} />
+            ) : null}
+          </React.Fragment>
+        );
+      })}
       {showEmpty ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}
       {extra}
     </>
@@ -567,7 +637,7 @@ function ResetBankRow({ row }) {
       >
         {row.label}
       </span>
-      <div className="relative flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
+      <div className="relative min-w-0 flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
         <div
           className="bg-oai-gray-400 dark:bg-oai-gray-500 rounded-full h-full transition-[width] duration-500 ease-out"
           style={{ width: `${widthPct}%`, minWidth: widthPct > 0 ? "3px" : 0 }}
@@ -615,7 +685,7 @@ function ZcodeResetBankSection({ data }) {
         {copy("limits.zcode.reset_bank.title")}
       </div>
       {data.error ? (
-        <StatusLine tone="error">{copy("shared.error.prefix", { error: data.error })}</StatusLine>
+        <StatusLine tone="error">{data.error}</StatusLine>
       ) : groups.map((group) => (
         <div key={group.key} className="flex items-center gap-2 text-[11px]">
           <span
@@ -708,7 +778,7 @@ function ZcodeStartPlanSection({ data, mode, now }) {
           style={labelWidth > 0 ? { "--tt-limits-label-w": `${labelWidth}px` } : undefined}
         >
           {data.error ? (
-            <StatusLine tone="error">{copy("shared.error.prefix", { error: data.error })}</StatusLine>
+            <StatusLine tone="error">{data.error}</StatusLine>
           ) : (
             <>
               <LimitWindowSection rows={rows} mode={mode} />
@@ -733,10 +803,15 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
   const spec = PROVIDER_LIMIT_SPECS[id];
   if (!spec) return null;
   // Pace is computed once per window here and shared by the bar + the detail.
+  // A segmented pool always reads as used, like grok.com: its slices only add
+  // up to the headline in that orientation.
   const rows = spec
     .windows(data)
     .filter((s) => s.window)
-    .map((s) => ({ spec: s, pace: paceForSpec(s, mode, now) }));
+    .map((s) => {
+      const rowMode = s.productPool ? LIMIT_DISPLAY_MODES.USED : mode;
+      return { spec: s, mode: rowMode, pace: paceForSpec(s, rowMode, now) };
+    });
   const extra = renderProviderExtra(spec.extra, data);
   return (
     <ToolGroup
@@ -750,7 +825,7 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
       rightAdornment={subscription ? <SubscriptionRightBadge subscription={subscription} /> : null}
       toggleOnHeader={id === "zcode"}
     >
-      <LimitWindowSection mode={mode} rows={rows} extra={extra} />
+      <LimitWindowSection mode={mode} rows={rows} extra={extra} expanded={expanded} />
       {id === "opencodeGo" || id === "commandCode" ? (
         <EnvCredentialNotice providerId={id} data={data} onSaved={onKeySaved} />
       ) : null}
@@ -800,11 +875,11 @@ function renderProviderGroup(id, data, mode, expanded, onToggle, subscription = 
       id,
       <>
         <StatusLine>{copy("limits.status.not_connected")}</StatusLine>
-        {id === "opencodeGo" ? <OpenCodeGoSetupHint onSaved={onKeySaved} /> : null}
-        {id === "commandCode" ? <CommandCodeSetupHint onSaved={onKeySaved} /> : null}
-        {id === "codingPlan" ? <ArkCodingPlanSetupHint /> : null}
-        {id === "agentPlan" ? <ArkAgentPlanSetupHint /> : null}
-        {id === "devin" ? <DevinSetupHint /> : null}
+        {id === "opencodeGo" ? <SetupHint title={copy("limits.opencodeGo.setupHint.title")}><OpenCodeGoSetupHint onSaved={onKeySaved} /></SetupHint> : null}
+        {id === "commandCode" ? <SetupHint title={copy("limits.commandCode.setupHint.title")}><CommandCodeSetupHint onSaved={onKeySaved} /></SetupHint> : null}
+        {id === "codingPlan" ? <SetupHint title={copy("limits.codingPlan.setupHint.title")}><ArkCodingPlanSetupHint /></SetupHint> : null}
+        {id === "agentPlan" ? <SetupHint title={copy("limits.agentPlan.setupHint.title")}><ArkAgentPlanSetupHint /></SetupHint> : null}
+        {id === "devin" ? <SetupHint title={copy("limits.devin.setupHint.title")}><DevinSetupHint /></SetupHint> : null}
       </>,
       expanded,
       onToggle,
@@ -828,15 +903,15 @@ function renderProviderGroup(id, data, mode, expanded, onToggle, subscription = 
     return renderUnlinkedProvider(
       id,
       <>
-        <StatusLine tone="error">{copy("shared.error.prefix", { error: data.error })}</StatusLine>
+        <StatusLine tone="error">{data.error}</StatusLine>
         {id === "kiro"
           ? renderProviderExtra(PROVIDER_LIMIT_SPECS.kiro.extra, data)
           : null}
-        {id === "opencodeGo" ? <OpenCodeGoSetupHint onSaved={onKeySaved} /> : null}
-        {id === "commandCode" ? <CommandCodeSetupHint onSaved={onKeySaved} /> : null}
-        {id === "codingPlan" ? <ArkCodingPlanSetupHint /> : null}
-        {id === "agentPlan" ? <ArkAgentPlanSetupHint /> : null}
-        {id === "devin" ? <DevinSetupHint /> : null}
+        {id === "opencodeGo" ? <SetupHint title={copy("limits.opencodeGo.setupHint.title")}><OpenCodeGoSetupHint onSaved={onKeySaved} /></SetupHint> : null}
+        {id === "commandCode" ? <SetupHint title={copy("limits.commandCode.setupHint.title")}><CommandCodeSetupHint onSaved={onKeySaved} /></SetupHint> : null}
+        {id === "codingPlan" ? <SetupHint title={copy("limits.codingPlan.setupHint.title")}><ArkCodingPlanSetupHint /></SetupHint> : null}
+        {id === "agentPlan" ? <SetupHint title={copy("limits.agentPlan.setupHint.title")}><ArkAgentPlanSetupHint /></SetupHint> : null}
+        {id === "devin" ? <SetupHint title={copy("limits.devin.setupHint.title")}><DevinSetupHint /></SetupHint> : null}
       </>,
       expanded,
       onToggle,
@@ -1071,6 +1146,15 @@ function EnvCredentialNotice({ providerId, data, onSaved }) {
   );
 }
 
+function SetupHint({ title, children }) {
+  return (
+    <div className="text-xs text-oai-gray-600 dark:text-oai-gray-300" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      <div className="font-medium text-oai-gray-800 dark:text-oai-gray-100">{title}</div>
+      {children}
+    </div>
+  );
+}
+
 // OpenCode Go limits come from OpenCode's official authenticated usage API
 // (GET /zen/go/v1/usage, Bearer OPENCODE_GO_API_KEY) once the user subscribes.
 // The key is entered here and stored by the backend in a 0600 file — never in
@@ -1078,8 +1162,7 @@ function EnvCredentialNotice({ providerId, data, onSaved }) {
 // (issue 837). The panel only ever sends the key to the loopback backend.
 function OpenCodeGoSetupHint({ onSaved }) {
   return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">{copy("limits.opencodeGo.setupHint.title")}</div>
+    <div className="mt-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
       <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">{copy("limits.opencodeGo.setupHint.subtitle")}</div>
 
       <ol className="mt-2.5 space-y-2.5">
@@ -1120,10 +1203,7 @@ function CommandCodeSetupHint({ onSaved }) {
   const loginSnippet = commandCodeLoginSnippet();
 
   return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">
-        {copy("limits.commandCode.setupHint.title")}
-      </div>
+    <div className="mt-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
       <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">
         {copy("limits.commandCode.setupHint.subtitle")}
       </div>
@@ -1152,10 +1232,7 @@ function DevinSetupHint() {
   const loginSnippet = devinLoginSnippet();
 
   return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">
-        {copy("limits.devin.setupHint.title")}
-      </div>
+    <div className="mt-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
       <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">
         {copy("limits.devin.setupHint.subtitle")}
       </div>
@@ -1200,8 +1277,7 @@ function ArkCodingPlanSetupHint() {
   };
 
   return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">{copy("limits.codingPlan.setupHint.title")}</div>
+    <div className="mt-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
       <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">{copy("limits.codingPlan.setupHint.subtitle")}</div>
 
       <ol className="mt-2.5 space-y-2.5">
@@ -1263,8 +1339,7 @@ function ArkAgentPlanSetupHint() {
   };
 
   return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">{copy("limits.agentPlan.setupHint.title")}</div>
+    <div className="mt-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
       <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">{copy("limits.agentPlan.setupHint.subtitle")}</div>
 
       <ol className="mt-2.5 space-y-2.5">
@@ -1339,19 +1414,17 @@ function useWidestLabelWidth(containerRef) {
   return labelWidth;
 }
 
-export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, order, visibility, displayMode, subscriptions = [], showSubscriptions = true, onProviderKeySaved = null }) {
-  const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin };
+export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy, order, visibility, displayMode, subscriptions = [], showSubscriptions = true, onProviderKeySaved = null }) {
+  const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy };
   const containerRef = useRef(null);
   const labelWidth = useWidestLabelWidth(containerRef);
   const [expandedId, setExpandedId] = useState(null);
   const [now, setNow] = useState(() => Date.now());
-  const effectiveOrder = Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER;
+  const effectiveOrder = [...new Set((Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER)
+    .map((id) => id === "workbuddyAi" ? "workbuddy" : id))];
   const effectiveMode = displayMode === LIMIT_DISPLAY_MODES.REMAINING
     ? LIMIT_DISPLAY_MODES.REMAINING
     : LIMIT_DISPLAY_MODES.USED;
-  const modeLabel = effectiveMode === LIMIT_DISPLAY_MODES.REMAINING
-    ? copy("limits.settings.display_mode_remaining")
-    : copy("limits.settings.display_mode_used");
 
   // Refresh countdowns/remaining labels once a minute without re-fetching.
   useEffect(() => {
@@ -1408,19 +1481,14 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
 
   return (
     <FadeIn delay={0.15}>
-      <Card>
-        <div
+      <div
           ref={containerRef}
           data-limit-label-group=""
           className="flex flex-col gap-3"
           style={labelWidth > 0 ? { "--tt-limits-label-w": `${labelWidth}px` } : undefined}
         >
-          <h3 className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide">
-            {copy("limits.panel.title")}{copy("limits.panel.mode_separator")}{modeLabel}
-          </h3>
           {groups.length > 0 ? groups : <StatusLine>{copy("limits.status.all_hidden")}</StatusLine>}
-        </div>
-      </Card>
+      </div>
     </FadeIn>
   );
 }

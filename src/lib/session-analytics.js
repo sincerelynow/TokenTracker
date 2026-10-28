@@ -41,6 +41,7 @@ const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
 const wsl = require("./wsl-probe");
 const { resolveCodexRootsSync } = require("./codex-roots");
 const { discoverKimiWireFiles, kimiSessionDependencies, readKimiSessions } = require("./kimi-session");
+const { discoverOmpSessionFiles, ompSessionDependencies, readOmpSessions } = require("./omp-session");
 const {
   appendUniqueDirs,
   dedupeDirsByRealpath,
@@ -97,7 +98,8 @@ const {
 // v25 combines fork root identity and cache invalidation with upstream database sessions.
 // v26 adds Kimi wire sessions while preserving Codex root cache identity.
 // v27 discovers compressed Codex archives while preserving ordered root ownership.
-const SIDECAR_VERSION = 27;
+// v28 adds Ultrafast subsets and oh-my-pi sessions while retaining Codex root identity.
+const SIDECAR_VERSION = 28;
 const EDIT_TOOLS = new Set([
   "apply_patch",
   "edit",
@@ -151,7 +153,7 @@ function addTotals(target, delta) {
     target[key] = finite(target[key]) + finite(delta?.[key]);
   }
   for (const key of MODEL_USAGE_SUM_FIELDS) {
-    if (!/^(?:long_context_|priority_)|^(?:usage_events|rerouted_usage_events)$/.test(key)) continue;
+    if (!/^(?:long_context_|priority_|ultrafast_)|^(?:usage_events|rerouted_usage_events|long_context_usage_events|priority_usage_events|ultrafast_usage_events)$/.test(key)) continue;
     if (delta?.[key]) target[key] = finite(target[key]) + finite(delta[key]);
   }
 }
@@ -189,10 +191,21 @@ const MODEL_USAGE_SUM_FIELDS = [
   "priority_long_context_cache_creation_input_tokens",
   "priority_long_context_output_tokens",
   "priority_long_context_reasoning_output_tokens",
+  "ultrafast_input_tokens",
+  "ultrafast_cached_input_tokens",
+  "ultrafast_cache_creation_input_tokens",
+  "ultrafast_output_tokens",
+  "ultrafast_reasoning_output_tokens",
+  "ultrafast_long_context_input_tokens",
+  "ultrafast_long_context_cached_input_tokens",
+  "ultrafast_long_context_cache_creation_input_tokens",
+  "ultrafast_long_context_output_tokens",
+  "ultrafast_long_context_reasoning_output_tokens",
   "usage_events",
   "rerouted_usage_events",
   "long_context_usage_events",
   "priority_usage_events",
+  "ultrafast_usage_events",
   // Not a token counter: an edit turn is a turn, and turn_context both marks
   // where a turn begins and names its model, so an edit turn has exactly one
   // owner. Splitting it here keeps by_model.tokens_per_edit a ratio over one
@@ -1992,6 +2005,26 @@ async function scanKimiSessions(filePaths) {
   }));
 }
 
+async function scanOmpSessions(filePaths) {
+  // Batch the whole OMP inventory so fork copies that reuse entry ids are
+  // counted once across sessions (same contract as the hourly seenIds set).
+  const rows = await readOmpSessions(Array.isArray(filePaths) ? filePaths : [filePaths]);
+  return rows.map(({ identity, files, title, ...row }) => finalizeRecord({
+    ...row,
+    title: cleanSessionTitle(title),
+    version: SIDECAR_VERSION,
+    source: "omp",
+    session_hash: sessionHash("omp", identity),
+    project_key: projectKey(row.project_ref, files[0]),
+    ...sessionStorageUsage(files),
+  }));
+}
+
+async function scanOmpSession(filePath) {
+  const rows = await scanOmpSessions([filePath]);
+  return rows[0] || null;
+}
+
 async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const grokHome = resolveGrokHome(home);
   // config.scanRoots (#657): read from the tracker config unless the caller
@@ -2089,7 +2122,12 @@ async function discoverSessionFiles(home, env = process.env, deps = {}) {
     return roots;
   });
   const kimi = discoverKimiWireFiles(dedupeDirsByRealpath(kimiRoots), incomplete);
-  return { claude, codex: groupCodexFiles(codexEntries), grok, zcode, opencode, kimi, incomplete };
+  const usingMachineHome = path.resolve(home) === path.resolve((deps.homedir || os.homedir)());
+  const ompEnv = usingMachineHome
+    ? { ...env, HOME: home }
+    : { HOME: home, OMP_HOME: path.join(home, ".omp") };
+  const omp = discoverOmpSessionFiles(ompEnv, incomplete);
+  return { claude, codex: groupCodexFiles(codexEntries), grok, zcode, opencode, kimi, omp, incomplete };
 }
 
 function codexRootsSignature(roots) {
@@ -2201,6 +2239,9 @@ function analyticsEntryStatKey(source, filePath) {
   if (source === "kimi") {
     return `${sessionStat}|metadata:${filesSignature(kimiSessionDependencies(filePaths))}`;
   }
+  if (source === "omp") {
+    return `${sessionStat}|metadata:${filesSignature(ompSessionDependencies([filePaths].flat()))}`;
+  }
   if (source === "grok") {
     const primary = filePaths[0];
     return `${sessionStat}|summary:${sessionFileStatKey(grokSummaryPathFor(primary)) || "missing"}|signals:${sessionFileStatKey(grokSignalsPathFor(primary)) || "missing"}`;
@@ -2244,13 +2285,15 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   const retryOpencodeScan = fs.existsSync(incompleteOpencodePath);
   const incompleteKimiPath = `${metaPath}.kimi-incomplete`;
   const retryKimiScan = fs.existsSync(incompleteKimiPath);
+  const incompleteOmpPath = `${metaPath}.omp-incomplete`;
+  const retryOmpScan = fs.existsSync(incompleteOmpPath);
   let previousMeta = null;
   if (!force) {
     try {
       previousMeta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
       const checkedAt = Date.parse(previousMeta.checked_at || previousMeta.generated_at || "");
       if (
-        !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && previousMeta.version === SIDECAR_VERSION &&
+        !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && !retryOmpScan && previousMeta.version === SIDECAR_VERSION &&
         previousMeta.codex_roots_signature === rootSignature &&
         Number.isFinite(checkedAt) &&
         Date.now() - checkedAt < Math.max(0, Number(cacheTtlMs) || 0)
@@ -2283,6 +2326,8 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...discovered.codex.flatMap((group) => group.filePaths).map(codexTitleIndexPathFor).filter(Boolean),
     ...discovered.kimi,
     ...kimiSessionDependencies(discovered.kimi),
+    ...discovered.omp,
+    ...ompSessionDependencies(discovered.omp),
     ...discovered.grok,
     ...discovered.grok.map(grokSummaryPathFor),
     ...discovered.grok.map(grokSignalsPathFor),
@@ -2290,7 +2335,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...[...(discovered.zcode || []), ...(discovered.opencode || [])].flatMap((dbPath) => [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]),
   ]);
   if (
-    !force && !retryZcodeScan && !retryOpencodeScan && !retryKimiScan &&
+    !force && !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && !retryOmpScan &&
     previousMeta?.version === SIDECAR_VERSION &&
     previousMeta.signature === signature &&
     previousMeta.codex_roots_signature === rootSignature
@@ -2322,6 +2367,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...(discovered.zcode.length ? [{ source: "zcode", filePath: discovered.zcode, scan: scanZcodeSessions }] : []),
     ...(discovered.opencode.length ? [{ source: "opencode", filePath: discovered.opencode, scan: scanOpencodeSessions }] : []),
     ...(discovered.kimi.length ? [{ source: "kimi", filePath: discovered.kimi, scan: scanKimiSessions }] : []),
+    ...(discovered.omp.length ? [{ source: "omp", filePath: discovered.omp, scan: scanOmpSessions }] : []),
   ];
   // Files we could not turn into a row (permission denied, half-written line,
   // vanished mid-scan). Swallowing these silently made sessions disappear with
@@ -2330,6 +2376,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   let incompleteZcodeScan = false;
   let incompleteOpencodeScan = false;
   let incompleteKimiScan = false;
+  let incompleteOmpScan = false;
   for (const entry of entries) {
     const cacheKey = sessionFileCacheKey(entry.source, entry.filePath, entry.instance);
     const statKey = analyticsEntryStatKey(entry.source, entry.filePath);
@@ -2338,11 +2385,12 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       if (entry.source === "zcode") incompleteZcodeScan = true;
       if (entry.source === "opencode") incompleteOpencodeScan = true;
       if (entry.source === "kimi") incompleteKimiScan = true;
+      if (entry.source === "omp") incompleteOmpScan = true;
       continue;
     }
     let rows = null;
-    if (!force && !(entry.source === "zcode" && retryZcodeScan) && !(entry.source === "opencode" && retryOpencodeScan) && !(entry.source === "kimi" && retryKimiScan) && previousFiles[cacheKey]?.stat_key === statKey) {
-      if (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi") {
+    if (!force && !(entry.source === "zcode" && retryZcodeScan) && !(entry.source === "opencode" && retryOpencodeScan) && !(entry.source === "kimi" && retryKimiScan) && !(entry.source === "omp" && retryOmpScan) && previousFiles[cacheKey]?.stat_key === statKey) {
+      if (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || entry.source === "omp") {
         // One db scans to many cached rows; recover them all from the previous
         // pass. An empty recovery means the sidecar lost its rows — rescan.
         const cached = previousRows.filter((row) => row?.source === entry.source);
@@ -2363,6 +2411,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         if (entry.source === "zcode") incompleteZcodeScan = true;
         if (entry.source === "opencode") incompleteOpencodeScan = true;
         if (entry.source === "kimi") incompleteKimiScan = true;
+        if (entry.source === "omp") incompleteOmpScan = true;
         if (!process.env.NODE_TEST_CONTEXT) {
           console.warn(`[session-analytics] skipped ${entry.source} session file: ${error?.message || error}`);
         }
@@ -2376,7 +2425,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       // so key each by the db path plus its session id; a bare session id as a
       // separate path element would be path.resolve()d against the process cwd
       // and never match across runs.
-      row._cache_key = (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi") && (row.session_id || row.session_hash)
+      row._cache_key = (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || entry.source === "omp") && (row.session_id || row.session_hash)
         ? `${cacheKey}#${sessionHash(entry.source, row.session_id || row.session_hash)}`
         : cacheKey;
       sessions.push(row);
@@ -2400,10 +2449,14 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     await writeAtomic(incompleteKimiPath, "1\n");
     sessions.push(...readSidecar(sidecarPath).filter((row) => row.source === "kimi" && row.version === SIDECAR_VERSION));
   }
+  if (incompleteOmpScan) {
+    await writeAtomic(incompleteOmpPath, "1\n");
+    sessions.push(...readSidecar(sidecarPath).filter((row) => row.source === "omp" && row.version === SIDECAR_VERSION));
+  }
   sessions.sort((a, b) => String(b.ended_at || "").localeCompare(String(a.ended_at || "")));
   // A failed database scan is an incomplete inventory. Keep the last complete
   // snapshot and signature so an unchanged database is retried next build.
-  if (incompleteDirs.length === 0 && !incompleteZcodeScan && !incompleteOpencodeScan && !incompleteKimiScan) {
+  if (incompleteDirs.length === 0 && !incompleteZcodeScan && !incompleteOpencodeScan && !incompleteKimiScan && !incompleteOmpScan) {
     const content = sessions.map(serializeSessionRecord).join("\n") + (sessions.length ? "\n" : "");
     await writeAtomic(sidecarPath, content);
     const generatedAt = new Date().toISOString();
@@ -2418,6 +2471,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     await fsp.rm(incompleteZcodePath, { force: true });
     await fsp.rm(incompleteOpencodePath, { force: true });
     await fsp.rm(incompleteKimiPath, { force: true });
+    await fsp.rm(incompleteOmpPath, { force: true });
   }
   // Non-enumerable so the array still behaves exactly like a plain row list
   // for every existing caller (map/filter/JSON of the rows is unaffected).
@@ -2705,6 +2759,7 @@ function resumeCommandFor(source, sessionId) {
   // Grok Build: `grok --resume <session-id>` (also accepts a title). The
   // command must still be run from the session's project_ref cwd.
   if (source === "grok") return `grok --resume ${id}`;
+  if (source === "omp") return `omp --resume ${id}`;
   return null;
 }
 
@@ -3050,6 +3105,8 @@ module.exports = {
   scanZcodeSessions,
   scanOpencodeSessions,
   scanKimiSessions,
+  scanOmpSessions,
+  scanOmpSession,
   buildSessionAnalytics,
   summarizeSessions,
   listSessionsForBrowser,

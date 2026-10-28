@@ -133,6 +133,8 @@ const {
   parseZedIncremental,
   resolveLmstudioLogFiles,
   parseLmstudioIncremental,
+  resolveOpenSquillaDbPaths,
+  parseOpenSquillaIncremental,
   resolveUnslothDbPath,
   parseUnslothIncremental,
   resolveAnythingllmDbPath,
@@ -205,6 +207,18 @@ const {
   scanRootDirState,
 } = require("../lib/scan-roots");
 const { resolveRuntimeConfig, isLegacyInsforgeBaseUrl } = require("../lib/runtime-config");
+const { resolveDeviceTokenPresence } = require("../lib/cloud-device-token");
+
+function formatSyncUploadSummaryLine({ runtimeDeviceToken, uploadResult, tokenPresentOnDisk }) {
+  if (runtimeDeviceToken) {
+    return `- Uploaded: ${uploadResult.inserted} inserted, ${uploadResult.skipped} skipped`;
+  }
+  if (tokenPresentOnDisk) {
+    return "- Uploaded: skipped (handled by local server; device token is set)";
+  }
+  return "- Uploaded: skipped (no device token)";
+}
+
 const { extractTokenCount } = require("../lib/codex-rollout-parser");
 const {
   consumeUsageDelta,
@@ -370,6 +384,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "omp",
   "opencode",
   "openclaw",
+  "opensquilla",
   "pi",
   "qoder",
   "qoder-cn",
@@ -1932,6 +1947,25 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
+    let opensquillaResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("opensquilla")) {
+      const opensquillaDbPaths = resolveOpenSquillaDbPaths(process.env)
+        .filter((dbPath) => fssync.existsSync(dbPath));
+      if (opensquillaDbPaths.length > 0) {
+        if (progress?.enabled) progress.start("Parsing OpenSquilla " + renderBar(0) + " | buckets 0");
+        try {
+          opensquillaResult = await parseOpenSquillaIncremental({
+            dbPaths: opensquillaDbPaths,
+            cursors,
+            queuePath,
+            onProgress: makeProviderProgress("OpenSquilla"),
+          });
+        } catch (err) {
+          warnProviderParseFailure("OpenSquilla", err, opts);
+        }
+      }
+    }
+
     // ── AnythingLLM Desktop (workspace_chats.response.metrics) ──
     let anythingllmResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     if (sourceAllowed("anythingllm")) {
@@ -3417,6 +3451,7 @@ async function cmdSync(argv, context = {}) {
       copilotResult.recordsProcessed +
       lmstudioResult.recordsProcessed +
       unslothResult.recordsProcessed +
+      opensquillaResult.recordsProcessed +
       anythingllmResult.recordsProcessed +
       devinResult.recordsProcessed +
       kiloResult.recordsProcessed +
@@ -3464,6 +3499,7 @@ async function cmdSync(argv, context = {}) {
       copilotResult.bucketsQueued +
       lmstudioResult.bucketsQueued +
       unslothResult.bucketsQueued +
+      opensquillaResult.bucketsQueued +
       anythingllmResult.bucketsQueued +
       devinResult.bucketsQueued +
       kiloResult.bucketsQueued +
@@ -3771,9 +3807,11 @@ async function cmdSync(argv, context = {}) {
           "Sync finished:",
           `- Parsed files: ${totalParsed}`,
           `- New 30-min buckets queued: ${totalBuckets}`,
-          runtime.deviceToken
-            ? `- Uploaded: ${uploadResult.inserted} inserted, ${uploadResult.skipped} skipped`
-            : "- Uploaded: skipped (no device token)",
+          formatSyncUploadSummaryLine({
+            runtimeDeviceToken: runtime.deviceToken,
+            uploadResult,
+            tokenPresentOnDisk: resolveDeviceTokenPresence({ trackerDir, config, runtime }).set,
+          }),
           runtime.deviceToken && pendingBytes > 0 && !opts.drain
             ? `- Remaining: ${formatBytes(pendingBytes)} pending (run sync again, or use --drain)`
             : null,
@@ -3908,6 +3946,7 @@ function recordCodexColdScanAudit(
 }
 
 module.exports = {
+  formatSyncUploadSummaryLine,
   cmdSync,
   acquireSyncLock,
   readQueueBatch,

@@ -208,6 +208,35 @@ async function parserTotals(lines, chunks = [lines.length]) {
 
 const everyLine = (lines) => lines.map((_, i) => i + 1);
 
+test("compaction retains the configured Codex root in hourly and project buckets", async () => {
+  await withTmp(async (ctx) => {
+    await fs.mkdir(path.join(ctx.dir, ".git"));
+    await fs.writeFile(path.join(ctx.dir, ".git", "config"), '[remote "origin"]\n\turl = https://github.com/acme/app.git\n');
+    const lines = compactionLines({ advances: false });
+    lines[0] = meta(SESSION, { cwd: ctx.dir });
+    await fs.writeFile(ctx.rolloutPath, lines.join("\n") + "\n");
+    const source = "codex-root:codex-ipc-12345678";
+    const projectQueuePath = path.join(ctx.dir, "project.queue.jsonl");
+    const options = {
+      rolloutFiles: [{ path: ctx.rolloutPath, source: "codex", statsSource: source }],
+      cursors: ctx.cursors,
+      queuePath: ctx.queuePath,
+      projectQueuePath,
+      publicRepoResolver: async ({ projectRef }) => ({ status: "public_verified", projectKey: "acme/app", projectRef }),
+    };
+    await parseRolloutIncremental(options);
+    for (const file of [ctx.queuePath, projectQueuePath]) {
+      const rows = (await fs.readFile(file, "utf8")).trim().split("\n").map(JSON.parse);
+      assert.ok(rows.length > 0);
+      assert.ok(rows.every((row) => row.source === source), "compaction must stay in its root bucket");
+    }
+    assert.deepEqual(await queueTotals(ctx.queuePath), sumNorm(R1, RC, R2));
+    const before = await fs.readFile(ctx.queuePath, "utf8");
+    await parseRolloutIncremental(options);
+    assert.equal(await fs.readFile(ctx.queuePath, "utf8"), before);
+  });
+});
+
 test("compaction: the record is counted once, the context snapshot never (sync)", async () => {
   const lines = compactionLines({ advances: false });
   const expected = sumNorm(R1, RC, R2);

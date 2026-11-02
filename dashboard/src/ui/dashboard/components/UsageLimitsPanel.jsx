@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertCircle, ChevronDown, Gift, Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
+import { AlertCircle, ChevronDown, Gift, Globe, Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy, getCopyLocale } from "../../../lib/copy";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
@@ -590,9 +590,13 @@ function LimitWindowSection({ rows, mode, extra = null, expanded = false }) {
     <>
       {rows.map(({ spec, pace, mode: rowMode = mode }) => {
         const pct = readWindowPct(spec.window, spec.pctField);
-        // The per-product split is detail: collapsed shows the whole pool,
-        // expanding the group splits the bar and adds the legend.
-        const segments = expanded ? spec.segments : null;
+        // Product shares are detail. Collapsed shows the whole pool. Expanding
+        // lists each share. The stacked bar is the used orientation only:
+        // in remaining mode the fill is what's left, and the shares stay in
+        // the legend because they are points of the amount used.
+        const hasShareSegments = expanded && spec.productPool && Array.isArray(spec.segments) && spec.segments.length !== 0;
+        const shareSegments = hasShareSegments ? spec.segments : null;
+        const barSegments = shareSegments && rowMode !== LIMIT_DISPLAY_MODES.REMAINING ? shareSegments : null;
         return (
           <React.Fragment key={spec.key}>
             <LimitBar
@@ -600,13 +604,24 @@ function LimitWindowSection({ rows, mode, extra = null, expanded = false }) {
               pct={pct}
               reset={formatReset(readWindowReset(spec.window, spec.resetField))}
               mode={rowMode}
-              segments={segments}
+              segments={barSegments}
               pacePercent={pace.pacePercent}
               paceOver={pace.paceOver}
               title={buildWindowHoverDetail(spec, pace, rowMode)}
             />
-            {segments ? (
-              <LimitSegmentLegend segments={segments} fillColor={barColor(pct, LIMIT_DISPLAY_MODES.USED)} />
+            {shareSegments ? (
+              <>
+                <LimitSegmentLegend segments={shareSegments} fillColor={barColor(pct, LIMIT_DISPLAY_MODES.USED)} />
+                {rowMode === LIMIT_DISPLAY_MODES.REMAINING ? (
+                  <div
+                    data-limit-share-note=""
+                    className="-mt-0.5 text-[11px] leading-snug text-oai-gray-400 dark:text-oai-gray-500"
+                    style={{ paddingLeft: "calc(var(--tt-limits-label-w, 0px) + 0.5rem)" }}
+                  >
+                    {copy("limits.grok.shares_are_used")}
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </React.Fragment>
         );
@@ -669,52 +684,143 @@ function ResetBankSection({ model }) {
   );
 }
 
+// Countdown bar scale per group (issue 888 R2): ZCode reset cards carry only
+// expires_at (no grant time), so the bar shows "time until the earliest live
+// card expires" against a fixed scale of one window per group — cards align to
+// window boundaries, so the earliest card never exceeds it and anything beyond
+// clips at 100%. A larger scale would pin bars near empty and read as false
+// urgency. Keep in sync with the menu-bar popover (UsageLimitsView.swift
+// zcodeFiveHourResetCountdownScale / zcodeWeeklyResetCountdownScale).
+const ZCODE_RESET_COUNTDOWN_SCALES_MS = {
+  five_hour: 5 * 3600 * 1000,
+  weekly: 7 * 24 * 3600 * 1000,
+};
+
+// Clean-zero visibility gate shared by renderProviderExtra and
+// ZcodeResetBankSection: mirror the Codex reset bank (`buildResetBankRows`)
+// and hide on a clean zero, while a fetch failure always counts as content so
+// the error cannot hide behind the collapse toggle (issue 888).
+// A plain loop, not an arrow chain: the ui-hardcode scanner's `>...<` regex
+// would read an unbraced arrow body here as raw JSX text.
+function zcodeResetBankHasContent(data, now) {
+  if (!data || typeof data !== "object") return false;
+  if (data.error) return true;
+  for (const key of ["five_hour", "weekly"]) {
+    for (const card of data[key] || []) {
+      if (Date.parse(card?.expires_at) > now) return true;
+    }
+  }
+  return false;
+}
+
 function ZcodeResetBankSection({ data }) {
+  const [open, setOpen] = useState(false);
   const now = Date.now();
+  if (!zcodeResetBankHasContent(data, now)) return null;
   const groups = [
     { key: "five_hour", label: copy("limits.label.zcode_5h") },
     { key: "weekly", label: copy("limits.label.zcode_weekly") },
-  ].map((group) => ({
-    ...group,
-    cards: (data[group.key] || []).filter((card) => Date.parse(card.expires_at) > now)
-      .slice().sort((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at)),
-  }));
+  ].map((group) => {
+    const cards = (data[group.key] || [])
+      .filter((card) => Date.parse(card.expires_at) > now)
+      .sort((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at));
+    // The inventory is issued in batches that share one expiry instant, so the
+    // hover title collapses same-instant repeats into "time ×count" (issue 888).
+    const batchCounts = new Map();
+    for (const card of cards) {
+      const ms = Date.parse(card.expires_at);
+      batchCounts.set(ms, (batchCounts.get(ms) || 0) + 1);
+    }
+    const batches = [...batchCounts.entries()].sort((a, b) => a[0] - b[0]);
+    const batchTitle = batches
+      .map(([ms, n]) => (n > 1
+        ? copy("limits.zcode.reset_bank.batch", { time: formatExactReset(ms), count: n })
+        : formatExactReset(ms)))
+      .join("\n");
+    const scale = ZCODE_RESET_COUNTDOWN_SCALES_MS[group.key] || 0;
+    const countdownPercent =
+      cards.length && scale
+        ? Math.max(0, Math.min(100, ((Date.parse(cards[0].expires_at) - now) / scale) * 100))
+        : 0;
+    return { ...group, cards, batchTitle, countdownPercent };
+  });
+  // A plain loop, not `reduce`: an unbraced arrow body would let the
+  // ui-hardcode scanner's `>...<` regex read this line as raw JSX text.
+  let totalLive = 0;
+  const liveGroups = [];
+  for (const group of groups) {
+    totalLive += group.cards.length;
+    if (group.cards.length) liveGroups.push(group);
+  }
   return (
-    <div className="mt-1 flex flex-col gap-1.5">
-      <div className="text-[10.5px] font-medium uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
-        {copy("limits.zcode.reset_bank.title")}
-      </div>
+    <div className="mt-2 border-t border-oai-gray-200/60 pt-2 dark:border-oai-gray-800">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}
+        onKeyDown={(event) => event.stopPropagation()}
+        className="flex w-full items-center gap-1.5 rounded text-xs text-oai-gray-500 transition-colors hover:text-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-oai-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
+      >
+        <ClockIcon size={13} aria-hidden />
+        <span className="min-w-0 truncate">{copy("limits.zcode.reset_bank.title")}</span>
+        {totalLive ? (
+          <span className="rounded-full bg-oai-gray-100 px-2 py-0.5 text-[10px] tabular-nums text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
+            {copy("limits.zcode.reset_bank.count", { count: totalLive })}
+          </span>
+        ) : null}
+        <ChevronDown size={13} aria-hidden className={`ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {/* A failed inventory fetch stays visible above the collapsible body even
+          while the section is collapsed, so it cannot hide behind the toggle. */}
       {data.error ? (
         <StatusLine tone="error">{data.error}</StatusLine>
-      ) : groups.map((group) => (
-        <div key={group.key} className="flex items-center gap-2 text-[11px]">
-          <span
-            data-limit-label=""
-            className="shrink-0 whitespace-nowrap text-oai-gray-500 dark:text-oai-gray-400"
-            style={{ width: "var(--tt-limits-label-w)" }}
-          >
-            {group.label}
-          </span>
-          <span className="rounded-full bg-oai-gray-100 px-2 py-0.5 tabular-nums text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
-            {copy("limits.zcode.reset_bank.count", { count: group.cards.length })}
-          </span>
-          {group.cards.length ? (
-            <span
-              className="ml-auto text-right text-[10px] tabular-nums text-oai-gray-400 dark:text-oai-gray-500"
-              title={group.cards.map((card) => formatExactReset(Date.parse(card.expires_at))).join("\n")}
-            >
-              {copy("limits.zcode.reset_bank.earliest", { time: formatExactReset(Date.parse(group.cards[0].expires_at)) })}
-            </span>
-          ) : null}
+      ) : null}
+      {open && !data.error ? (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {liveGroups.map((group) => (
+            <div key={group.key} className="flex items-center gap-2 text-[11px]">
+              <span
+                data-limit-label=""
+                className="shrink-0 whitespace-nowrap text-oai-gray-500 dark:text-oai-gray-400"
+                style={{ width: "var(--tt-limits-label-w)" }}
+              >
+                {group.label}
+              </span>
+              <span className="rounded-full bg-oai-gray-100 px-2 py-0.5 tabular-nums text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
+                {copy("limits.zcode.reset_bank.count", { count: group.cards.length })}
+              </span>
+              <div
+                className="relative min-w-0 flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden"
+                title={group.batchTitle}
+              >
+                <div
+                  className="bg-oai-gray-400 dark:bg-oai-gray-500 rounded-full h-full transition-[width] duration-500 ease-out"
+                  style={{ width: `${group.countdownPercent}%`, minWidth: group.countdownPercent > 0 ? "3px" : 0 }}
+                />
+              </div>
+              {group.cards.length ? (
+                <span
+                  className="ml-auto shrink-0 whitespace-nowrap text-right text-[10px] tabular-nums text-oai-gray-400 dark:text-oai-gray-500"
+                  title={group.batchTitle}
+                >
+                  {copy("limits.zcode.reset_bank.earliest", { time: formatExactReset(Date.parse(group.cards[0].expires_at)) })}
+                </span>
+              ) : null}
+            </div>
+          ))}
         </div>
-      ))}
+      ) : null}
     </div>
   );
 }
 
 function renderProviderExtra(kind, data) {
   if (kind === "zcode_reset_bank") {
-    return data.reset_credits ? <ZcodeResetBankSection data={data.reset_credits} /> : null;
+    // Hand LimitWindowSection a real null when the bank is spent: a truthy
+    // element that renders nothing would still suppress the no-data line.
+    return zcodeResetBankHasContent(data.reset_credits, Date.now())
+      ? <ZcodeResetBankSection data={data.reset_credits} />
+      : null;
   }
   if (kind === "codex_meta") {
     // Credit amounts show on hover (LimitBar's title) instead of an
@@ -799,19 +905,64 @@ function ZcodeStartPlanSection({ data, mode, now }) {
   );
 }
 
+// Snapshot of the user's other region (issue 938), read from ZCode's own
+// usage logs. ZCode only queries the balance of the region currently in use
+// (issue 959), so while the other region's log rows are inside the scan
+// window TokenTracker also persists them to the disk cache and serves that
+// snapshot here once they age out; the row below shows the data's age.
+function ZcodeOtherRegionSection({ data, mode, now }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+  const labelWidth = useWidestLabelWidth(containerRef);
+  const regionName = copy(data.region === "zai" ? "limits.zcode.region.zai" : "limits.zcode.region.bigmodel");
+  const planLabel = data.plan_label || copy("limits.zcode.start_grants");
+  const title = copy("limits.zcode.other_region.title", { region: regionName, plan: planLabel });
+  const rows = PROVIDER_LIMIT_SPECS.zcode.windows(data)
+    .filter((s) => s.window)
+    .map((s) => ({ spec: s, mode, pace: paceForSpec(s, mode, now) }));
+  const snapshotMs = Date.parse(data.log_timestamp);
+  return (
+    <div className="mt-2 border-t border-oai-gray-200/60 pt-2 dark:border-oai-gray-800">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}
+        onKeyDown={(event) => event.stopPropagation()}
+        className="flex w-full items-center gap-1.5 rounded text-xs text-oai-gray-500 transition-colors hover:text-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-oai-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
+      >
+        <Globe size={13} aria-hidden />
+        <span className="min-w-0 truncate" title={title}>{title}</span>
+        <ChevronDown size={13} aria-hidden className={`ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <div
+          ref={containerRef}
+          data-limit-label-group=""
+          className="mt-2 flex flex-col gap-1.5"
+          style={labelWidth > 0 ? { "--tt-limits-label-w": `${labelWidth}px` } : undefined}
+        >
+          <LimitWindowSection rows={rows} mode={mode} />
+          <LimitDetail rows={rows} mode={mode} now={now} />
+          {Number.isFinite(snapshotMs) ? (
+            <StatusLine>
+              {copy("limits.zcode.other_region.snapshot", { time: formatExactReset(snapshotMs) })}
+            </StatusLine>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge = null, subscription = null, now = Date.now(), onKeySaved = null) {
   const spec = PROVIDER_LIMIT_SPECS[id];
   if (!spec) return null;
   // Pace is computed once per window here and shared by the bar + the detail.
-  // A segmented pool always reads as used, like grok.com: its slices only add
-  // up to the headline in that orientation.
+  // Every window, including a segmented pool, follows the selected display mode.
   const rows = spec
     .windows(data)
     .filter((s) => s.window)
-    .map((s) => {
-      const rowMode = s.productPool ? LIMIT_DISPLAY_MODES.USED : mode;
-      return { spec: s, mode: rowMode, pace: paceForSpec(s, rowMode, now) };
-    });
+    .map((s) => ({ spec: s, mode, pace: paceForSpec(s, mode, now) }));
   const extra = renderProviderExtra(spec.extra, data);
   return (
     <ToolGroup
@@ -836,6 +987,9 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
       ) : null}
       {id === "zcode" && data.start_plan?.configured ? (
         <ZcodeStartPlanSection data={data.start_plan} mode={mode} now={now} />
+      ) : null}
+      {id === "zcode" && data.other_region ? (
+        <ZcodeOtherRegionSection data={data.other_region} mode={mode} now={now} />
       ) : null}
     </ToolGroup>
   );
@@ -1414,14 +1568,13 @@ function useWidestLabelWidth(containerRef) {
   return labelWidth;
 }
 
-export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy, order, visibility, displayMode, subscriptions = [], showSubscriptions = true, onProviderKeySaved = null }) {
-  const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy };
+export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy, workbuddyAi, order, visibility, displayMode, subscriptions = [], showSubscriptions = true, onProviderKeySaved = null }) {
+  const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy, workbuddyAi };
   const containerRef = useRef(null);
   const labelWidth = useWidestLabelWidth(containerRef);
   const [expandedId, setExpandedId] = useState(null);
   const [now, setNow] = useState(() => Date.now());
-  const effectiveOrder = [...new Set((Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER)
-    .map((id) => id === "workbuddyAi" ? "workbuddy" : id))];
+  const effectiveOrder = [...new Set(Array.isArray(order) && order.length > 0 ? order : DEFAULT_ORDER)];
   const effectiveMode = displayMode === LIMIT_DISPLAY_MODES.REMAINING
     ? LIMIT_DISPLAY_MODES.REMAINING
     : LIMIT_DISPLAY_MODES.USED;

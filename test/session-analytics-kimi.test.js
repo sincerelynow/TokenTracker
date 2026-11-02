@@ -160,7 +160,7 @@ test("Kimi and Codex roots coexist through old cache rebuilds and root relabelin
   write(path.join(root, "sessions", `rollout-${codexId}.jsonl`), [
     { timestamp: "2026-10-10T01:00:00Z", type: "session_meta", payload: { id: codexId, cwd: "/repo/codex-app" } },
     { timestamp: "2026-10-10T01:00:01Z", type: "turn_context", payload: { model: "gpt-5.6-sol" } },
-    { timestamp: "2026-10-10T01:00:02Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 5, output_tokens: 2 } } } },
+    { timestamp: "2026-10-10T01:00:02Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 } } } },
   ]);
   fs.mkdirSync(trackerDir, { recursive: true });
   const saveRoot = (label) => fs.writeFileSync(path.join(trackerDir, "config.json"), JSON.stringify({

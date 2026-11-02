@@ -44,7 +44,7 @@ async function writeCodexSession(root, bucket, sessionId, {
       type: "event_msg",
       payload: {
         type: "token_count",
-        info: { last_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens } },
+        info: { last_token_usage: { input_tokens: inputTokens, output_tokens: outputTokens, total_tokens: inputTokens + outputTokens } },
       },
     },
   ];

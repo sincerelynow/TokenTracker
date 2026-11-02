@@ -92,7 +92,11 @@ enum Strings {
     // render the same label.
     static var qoderPlanLabel: String { t("Plan", "套餐", "套餐", "プラン", "플랜") }
     static var workbuddyPlanLabel: String { t("Plan", "套餐", "套餐", "プラン", "플랜") }
+    // WorkBuddy resource packages: every non-plan credit group (gift, top-up
+    // and platform rewards) pooled into one window, as the desktop app shows.
+    static var workbuddyAddonLabel: String { t("Add-on", "资源包", "資源包", "リソースパック", "리소스 팩") }
     static var qoderBonusLabel: String { t("Bonus", "奖励", "獎勵", "ボーナス", "보너스") }
+    static var qoderAddonLabel: String { t("Add-on", "资源包", "資源包", "リソースパック", "리소스 팩") }
     static var grokMonthLabel: String { t("Month", "月度", "月度", "月間", "월간") }
     static var grokWeekLabel: String { t("Weekly", "周", "週", "週間", "주간") }
     static var grokDayLabel: String { t("Daily", "日", "日", "日", "일") }
@@ -121,6 +125,18 @@ enum Strings {
             let trimmed = fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return trimmed.isEmpty ? product : trimmed
         }
+    }
+
+    /// Shown under the product legend in Remaining mode. The shares are points
+    /// of the amount used, so they do not add up to the remaining headline.
+    static var grokSharesAreUsed: String {
+        t(
+            "Product shares are portions of the amount used.",
+            "各产品百分比是已用部分的份额。",
+            "各產品百分比是已用部分的份額。",
+            "各製品の割合は、使用した分の内訳です。",
+            "제품별 비율은 사용한 양의 몫입니다."
+        )
     }
     static var limitResetNow: String { t("now", "现在", "現在", "今", "지금") }
     static func kimiParallelLabel(_ count: Int) -> String {
@@ -449,6 +465,18 @@ enum Strings {
     static var fileDownloadFailed: String { t("File download failed. This may be a network issue.", "文件下载失败，可能是网络问题。", "檔案下載失敗，可能是網路問題。", "ファイルのダウンロードに失敗しました。ネットワークの問題の可能性があります。", "파일 다운로드에 실패했습니다. 네트워크 문제일 수 있습니다.") }
     static func installFailed(_ reason: String) -> String { t("Installation failed: \(reason)", "安装失败：\(reason)", "安裝失敗：\(reason)", "インストールに失敗しました：\(reason)", "설치에 실패했습니다: \(reason)") }
     static var noReleaseAvailable: String { t("No release available.", "暂无可用发布版本。", "暫無可用釋出版本。", "利用可能なリリースがありません。", "사용 가능한 릴리스가 없습니다.") }
+    static var updateRateLimitedStatus: String {
+        t("GitHub API rate limited. Try again later.", "GitHub API 已限流，请稍后重试。", "GitHub API 已限流，請稍後重試。", "GitHub API がレート制限中のため、しばらくしてから再試行してください。", "GitHub API 사용량이 제한되었습니다. 잠시 후 다시 시도하세요.")
+    }
+    static func updateRateLimitedRetryAt(_ time: String) -> String {
+        t("GitHub API can be retried after: \(time)", "GitHub 接口可重试时间：\(time)", "GitHub 介面可重試時間：\(time)", "GitHub API の再試行可能日時：\(time)", "GitHub API 재시도 가능 시간: \(time)")
+    }
+    static var updateUnexpectedRedirect: String {
+        t("The update server returned an unexpected redirect.", "更新服务器返回了意外的跳转。", "更新伺服器回傳了意外的跳轉。", "アップデートサーバーが予期しないリダイレクトを返しました。", "업데이트 서버가 예상치 못한 리디렉션을 반환했습니다.")
+    }
+    static var updateAssetSizeUnavailable: String {
+        t("The update file size is unavailable.", "无法获取更新文件大小。", "無法取得更新檔案大小。", "更新ファイルのサイズを取得できません。", "업데이트 파일 크기를 가져올 수 없습니다.")
+    }
 
     static func minutesAgo(_ n: Int) -> String { t("\(n)m ago", "\(n) 分钟前", "\(n) 分鐘前", "\(n)分前", "\(n)분 전") }
     static func hoursAgo(_ n: Int) -> String { t("\(n)h ago", "\(n) 小时前", "\(n) 小時前", "\(n)時間前", "\(n)시간 전") }

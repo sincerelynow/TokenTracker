@@ -73,6 +73,7 @@ struct UsageLimitsView: View {
         "agentPlan": "VolcanoArkLogo",
         "devin": "DevinLogo",
         "workbuddy": "CodeBuddyLogo",
+        "workbuddyAi": "CodeBuddyLogo",
     ]
 
     var body: some View {
@@ -231,6 +232,10 @@ struct UsageLimitsView: View {
             if let workbuddy = limits.workbuddy, workbuddy.configured, workbuddy.error == nil {
                 return toolSection(id: id, title: planTitle("WorkBuddy", workbuddy.planLabel), assetName: "CodeBuddyLogo", toolName: "WorkBuddy", specs: workbuddySpecs(workbuddy), updatedAtISO: workbuddy.cachedAt, isStale: workbuddy.stale ?? false)
             }
+        case "workbuddyAi":
+            if let workbuddyAi = limits.workbuddyAi, workbuddyAi.configured, workbuddyAi.error == nil {
+                return toolSection(id: id, title: planTitle("WorkBuddy AI", workbuddyAi.planLabel), assetName: "CodeBuddyLogo", toolName: "WorkBuddy AI", specs: workbuddySpecs(workbuddyAi), updatedAtISO: workbuddyAi.cachedAt, isStale: workbuddyAi.stale ?? false)
+            }
         default:
             break
         }
@@ -348,9 +353,13 @@ struct UsageLimitsView: View {
                     // The per-product split is detail: it shows only while this
                     // provider is clicked open; otherwise the bar is the whole pool.
                     let showSegments = explainingProvider == id && !spec.segments.isEmpty
-                    limitRow(label: spec.label, pct: spec.pct, reset: spec.resetText, toolName: toolName, windowSeconds: spec.windowSeconds, resetDate: spec.resetDate, segments: spec.segments, showSegments: showSegments, productPool: spec.productPool, creditsDetail: spec.creditsDetail)
+                    limitRow(label: spec.label, pct: spec.pct, reset: spec.resetText, toolName: toolName, windowSeconds: spec.windowSeconds, resetDate: spec.resetDate, segments: spec.segments, showSegments: showSegments, creditsDetail: spec.creditsDetail)
                     if showSegments {
-                        segmentLegend(spec.segments, pct: spec.pct)
+                        segmentLegend(
+                            spec.segments,
+                            pct: spec.pct,
+                            note: settings.displayMode == .remaining && spec.productPool ? Strings.grokSharesAreUsed : nil
+                        )
                     }
                 }
                 if let sub = subscription {
@@ -593,8 +602,17 @@ struct UsageLimitsView: View {
 
     private func workbuddySpecs(_ w: WorkbuddyLimits) -> [LimitWindowSpec] {
         var specs: [LimitWindowSpec] = []
-        if let window = w.primaryWindow {
+        // Empty 0/0 windows (no active plan / no resource credit) have no
+        // quota to read and would render as a full bar in remaining mode —
+        // drop them like a missing window. An exhausted plan (total > 0,
+        // remain 0) stays visible at 100%.
+        if let window = w.primaryWindow, window.limitCredits != 0 {
             var spec = makeSpec(Strings.workbuddyPlanLabel, window.usedPercent, iso: window.resetAt)
+            spec.creditsDetail = window.creditsDetail
+            specs.append(spec)
+        }
+        if let window = w.secondaryWindow, window.limitCredits != 0 {
+            var spec = makeSpec(Strings.workbuddyAddonLabel, window.usedPercent, iso: window.resetAt)
             spec.creditsDetail = window.creditsDetail
             specs.append(spec)
         }
@@ -610,8 +628,14 @@ struct UsageLimitsView: View {
 
     private func qoderSpecs(_ q: QoderLimits) -> [LimitWindowSpec] {
         var specs: [LimitWindowSpec] = []
-        if let window = q.primaryWindow {
+        // Empty 0/0 buckets (no active plan / no add-on pack) have no quota to
+        // read and would render as a full bar in remaining mode — drop them
+        // like a missing window. Windows without credit fields are kept.
+        if let window = q.primaryWindow, window.limitCredits != 0 {
             specs.append(makeSpec(Strings.qoderPlanLabel, window.usedPercent, iso: window.resetAt))
+        }
+        if let window = q.tertiaryWindow, window.limitCredits != 0 {
+            specs.append(makeSpec(Strings.qoderAddonLabel, window.usedPercent, iso: window.resetAt))
         }
         if let window = q.secondaryWindow {
             specs.append(makeSpec(Strings.qoderBonusLabel, window.usedPercent, iso: window.resetAt))
@@ -692,13 +716,13 @@ struct UsageLimitsView: View {
         resetDate: Date? = nil,
         segments: [LimitSegment] = [],
         showSegments: Bool = false,
-        productPool: Bool = false,
         creditsDetail: String? = nil
     ) -> some View {
         let rawClamped = min(max(pct, 0), 100)
         let usedFraction = rawClamped / 100.0
-        // A segmented pool stays in used mode, like grok.com: its slices only add up to the headline that way.
-        let remainingMode = settings.displayMode == .remaining && !productPool
+        // The headline follows the selected mode. Product slices are points of
+        // the amount used, so they stack only in used mode.
+        let remainingMode = settings.displayMode == .remaining
         let displayValue = remainingMode ? (100 - rawClamped) : rawClamped
 
         // Unified threshold fill (green → amber → red), based on actual usage so
@@ -737,7 +761,7 @@ struct UsageLimitsView: View {
                 fillColor: fillColor,
                 pacePercent: pacePercent,
                 paceOver: paceOver,
-                segments: showSegments ? segments.map(\.pct) : []
+                segments: (showSegments && !remainingMode) ? segments.map(\.pct) : []
             )
             .animation(reduceMotion ? .none : .easeOut(duration: 0.5), value: displayValue)
 
@@ -771,7 +795,7 @@ struct UsageLimitsView: View {
     /// Dot + name + share for each slice of a segmented bar, aligned under the
     /// bar. One concatenated Text so entries wrap like the web legend without
     /// `Layout` (macOS 13+); non-breaking spaces keep each entry on one line.
-    private func segmentLegend(_ segments: [LimitSegment], pct: Double) -> some View {
+    private func segmentLegend(_ segments: [LimitSegment], pct: Double, note: String? = nil) -> some View {
         let fillColor = Color.limitBar(fraction: min(max(pct, 0), 100) / 100.0)
         let entries = segments.enumerated().map { index, segment -> Text in
             let name = segment.label.replacingOccurrences(of: " ", with: "\u{00A0}")
@@ -784,14 +808,24 @@ struct UsageLimitsView: View {
         }
         let legend = entries.dropFirst().reduce(entries.first ?? Text("")) { $0 + Text("   ") + $1 }
         let labelWidth = labelColumnWidth > 0 ? min(labelColumnWidth, Self.labelColumnMaxWidth) : 0
-        return legend
-            .font(.system(.caption2, design: .default))
-            .monospacedDigit()
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, labelWidth + Self.rowColumnSpacing)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(segments.map { "\($0.label) \(segmentPercentLabel($0.pct))" }.joined(separator: ", "))
+        let sharesLabel = segments.map { "\($0.label) \(segmentPercentLabel($0.pct))" }.joined(separator: ", ")
+        return VStack(alignment: .leading, spacing: 2) {
+            legend
+                .font(.system(.caption2, design: .default))
+                .monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let note, !note.isEmpty {
+                Text(note)
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.leading, labelWidth + Self.rowColumnSpacing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(note.map { "\(sharesLabel). \($0)" } ?? sharesLabel)
     }
 
     private func segmentPercentLabel(_ pct: Double) -> String {
@@ -847,7 +881,7 @@ struct UsageLimitsView: View {
         )
     }
 
-    /// True when ZCode reset inventory should occupy space (error banner or any group).
+    /// True when ZCode reset inventory should occupy space (error banner or any live group).
     private func zcodeResetBankHasContent(_ resetCredits: ZcodeResetCredits?) -> Bool {
         guard let resetCredits else { return false }
         if let error = resetCredits.error, !error.isEmpty { return true }
@@ -858,30 +892,59 @@ struct UsageLimitsView: View {
         let id: String
         let label: String
         let count: Int
+        /// Earliest live card as a fixed-scale countdown: 100 = a whole window
+        /// of time left, 0 = expiring now (see the scale constants below).
+        let countdownPercent: Double
         let earliest: String?
         let earliestHelp: String?
     }
 
+    /// Fixed countdown scales for the ZCode reset-card bars (#888 R2). ZCode
+    /// cards carry only `expires_at` (no grant time), so instead of Codex's
+    /// per-card lifetime the bar shows "time until the earliest live card
+    /// expires" against a fixed scale of one window per group: cards align to
+    /// window boundaries, so the earliest live card is never further out than
+    /// this and anything beyond clips at 100%. An oversized scale would pin the
+    /// bars near empty and read as false urgency. Keep in sync with the
+    /// dashboard (`ZCODE_RESET_COUNTDOWN_SCALES_MS` in UsageLimitsPanel.jsx).
+    private static let zcodeFiveHourResetCountdownScale: TimeInterval = 5 * 3600
+    private static let zcodeWeeklyResetCountdownScale: TimeInterval = 7 * 86400
+
     private func zcodeResetBankGroups(_ resetCredits: ZcodeResetCredits, now: Date = Date()) -> [ZcodeResetGroupSpec] {
-        let pairs: [(String, String, [ZcodeResetCard]?)] = [
-            ("five_hour", "5h", resetCredits.fiveHour),
-            ("weekly", "Weekly", resetCredits.weekly),
+        let pairs: [(String, String, [ZcodeResetCard]?, TimeInterval)] = [
+            ("five_hour", "5h", resetCredits.fiveHour, Self.zcodeFiveHourResetCountdownScale),
+            ("weekly", "Weekly", resetCredits.weekly, Self.zcodeWeeklyResetCountdownScale),
         ]
-        return pairs.map { id, label, cards in
+        return pairs.map { id, label, cards, scale in
             let live = (cards ?? []).compactMap { card -> (Date, String)? in
                 guard let date = resetDate(iso: card.expiresAt), date > now else { return nil }
                 return (date, card.expiresAt)
             }.sorted { $0.0 < $1.0 }
             let earliest = live.first.map { Strings.codexResetBankExpiryDateTime($0.0) }
-            let help = live.map { Strings.codexResetBankExpiryDateTime($0.0) }.joined(separator: "\n")
+            // The inventory is issued in batches that share one expiry instant,
+            // so the tooltip collapses same-instant repeats into "time ×count".
+            let batches = Dictionary(grouping: live, by: { $0.0.timeIntervalSince1970 })
+                .sorted { $0.key < $1.key }
+            let help = batches.map { instant, group in
+                let time = Strings.codexResetBankExpiryDateTime(Date(timeIntervalSince1970: instant))
+                return group.count > 1 ? "\(time) ×\(group.count)" : time
+            }.joined(separator: "\n")
+            let countdown = live.first.map { next in
+                min(100, max(0, next.0.timeIntervalSince(now) / scale * 100))
+            } ?? 0
             return ZcodeResetGroupSpec(
                 id: id,
                 label: label,
                 count: live.count,
+                countdownPercent: countdown,
                 earliest: earliest.map { Strings.zcodeResetBankEarliest($0) },
                 earliestHelp: help.isEmpty ? nil : help
             )
         }
+        // Zero-count windows drop out, matching the Codex reset bank
+        // (codexResetRows): a "0 available" row carries no information, and an
+        // all-empty inventory lets zcodeResetBankHasContent hide the section.
+        .filter { $0.count > 0 }
     }
 
     @ViewBuilder
@@ -907,7 +970,12 @@ struct UsageLimitsView: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)
                             .background(Color.primary.opacity(0.06), in: Capsule())
-                        Spacer(minLength: 0)
+                        UsageLimitBar(
+                            percent: group.countdownPercent,
+                            fillColor: Color.limitBar(fraction: 0),
+                            pacePercent: nil,
+                            paceOver: false
+                        )
                         if let earliest = group.earliest {
                             Text(earliest)
                                 .font(.system(.caption2, design: .default))
@@ -935,11 +1003,19 @@ struct UsageLimitsView: View {
         let title = planNames.isEmpty ? Strings.zcodeStartGrantsTitle : planNames.joined(separator: " · ")
         let specs = zcodeStartPlanSpecs(startPlan)
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(.caption2, design: .default))
-                .modifier(FontWeightModifier(weight: .medium))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 2)
+            HStack(spacing: 4) {
+                // Decorative parity with the dashboard's lucide Gift on every
+                // start_plan section header (aria-hidden on the web side).
+                Image(systemName: "gift")
+                    .font(.system(.caption2, design: .default))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(.caption2, design: .default))
+                    .modifier(FontWeightModifier(weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.top, 2)
             if let error = startPlan.error, !error.isEmpty {
                 Text(error)
                     .font(.system(.caption2, design: .default))
@@ -955,7 +1031,6 @@ struct UsageLimitsView: View {
                         resetDate: spec.resetDate,
                         segments: spec.segments,
                         showSegments: false,
-                        productPool: spec.productPool,
                         creditsDetail: spec.creditsDetail
                     )
                 }
@@ -1356,7 +1431,8 @@ private struct LimitWindowSpec: Identifiable {
     let resetText: String?
     /// Shares of `pct` drawn as one stacked bar plus a legend (Grok products).
     var segments: [LimitSegment] = []
-    /// The pool keeps its used orientation even before the first post-reset product.
+    /// These slices are points of one shared cap. The headline still follows
+    /// used/remaining; the stack is drawn only while the mode is used.
     var productPool: Bool = false
     var creditsDetail: String? = nil
 }
@@ -1447,12 +1523,7 @@ private struct LimitsExplainContent: View {
 
     /// The footnote explains the pace mark, so it follows the rows that draw one.
     private var footnoteRemaining: Bool {
-        specs.contains { isRemaining($0) && pace(for: $0).pacePercent != nil }
-    }
-
-    /// A segmented pool always reads as used, matching its row.
-    private func isRemaining(_ spec: LimitWindowSpec) -> Bool {
-        remainingMode && !spec.productPool
+        remainingMode && hasPaceMarker
     }
 
     private func pace(for spec: LimitWindowSpec) -> LimitPace.Result {
@@ -1463,7 +1534,7 @@ private struct LimitsExplainContent: View {
             usedFraction: min(max(spec.pct, 0), 100) / 100.0,
             windowSeconds: windowSeconds,
             secondsUntilReset: resetDate.timeIntervalSinceNow,
-            remainingMode: isRemaining(spec)
+            remainingMode: remainingMode
         )
     }
 
@@ -1475,7 +1546,7 @@ private struct LimitsExplainContent: View {
         let pace = pace(for: spec)
         var text = Strings.limitWindowExplainLine(
             label: spec.label, used: used, expected: pace.expectedPercent, over: pace.paceOver,
-            runsOutEta: pace.runsOutEta, projectedEnd: pace.projectedEnd, remainingMode: isRemaining(spec)
+            runsOutEta: pace.runsOutEta, projectedEnd: pace.projectedEnd, remainingMode: remainingMode
         )
         // Exact local reset instant (#248) — the row itself only shows a compact
         // relative countdown, so the popover carries the precise time.

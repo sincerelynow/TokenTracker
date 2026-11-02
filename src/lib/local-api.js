@@ -26,6 +26,7 @@ const { createCloudDeviceTokenStore } = require("./cloud-device-token");
 const { parseBearerToken } = require("./bearer-token");
 const { writeJsonAtomicSync } = require("./atomic-json");
 const { createLocalUsageTransfer, MAX_BYTES: LOCAL_USAGE_MAX_BYTES } = require("./local-usage-transfer");
+const { fetchProviderServiceStatus } = require("./provider-status");
 
 const SYNC_TIMEOUT_MS = 120_000;
 // A failed account-view request should not stall every dashboard refresh
@@ -33,6 +34,10 @@ const SYNC_TIMEOUT_MS = 120_000;
 // request still falls back normally; subsequent fan-out requests reuse that
 // decision for a short cooldown and return local data immediately.
 const ACCOUNT_VIEW_FAILURE_BACKOFF_MS = 2 * 60_000;
+// A caller stops waiting for the cloud after the response timeout, but the
+// read keeps going in the background for this many times as long so a slow
+// edge can still fill the payload cache and end the backoff early.
+const ACCOUNT_VIEW_BACKGROUND_TIMEOUT_FACTOR = 5;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
 const MAX_DEVICE_NAME_LENGTH = 128;
 
@@ -1501,6 +1506,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
   // otherwise a fallback reason (see above) telling the caller — and, through
   // the `X-TokenTracker-Account-Fallback` header, the popover — why the local
   // single-machine data is being served instead.
+  const ACCOUNT_VIEW_STILL_PENDING = Symbol("account-view-still-pending");
   async function tryServeAccountView(usageSlug, url, res) {
     if (!getCloudSyncPref()) return ACCOUNT_FALLBACK_CLOUD_SYNC_OFF;
     const refreshToken = getRefreshTokenForCloud();
@@ -1520,7 +1526,15 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
     const envTimeout = process.env.TOKENTRACKER_HTTP_TIMEOUT_MS
       ? parseInt(process.env.TOKENTRACKER_HTTP_TIMEOUT_MS, 10)
       : 0;
-    const timeoutMs = envTimeout > 0 ? envTimeout : 4000;
+    // `responseTimeoutMs` bounds how long THIS caller waits before it gets the
+    // local fallback. The cloud read itself keeps running in the background
+    // for up to ACCOUNT_VIEW_BACKGROUND_TIMEOUT_FACTOR times that: full-history
+    // aggregates from far regions often take 2-6 s, and the first read after a
+    // backoff window meets an edge that went cold during it. A late success
+    // still fills the payload cache and clears the backoff, so the next poll is
+    // served instead of timing out again.
+    const responseTimeoutMs = envTimeout > 0 ? envTimeout : 4000;
+    const requestTimeoutMs = responseTimeoutMs * ACCOUNT_VIEW_BACKGROUND_TIMEOUT_FACTOR;
     try {
       // An identical overlapping read shares the entire probe, including its
       // token mint. A healthy pending read must not look like a cloud outage
@@ -1533,7 +1547,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
           baseUrl: runtime.baseUrl || DEFAULT_BASE_URL,
           anonKey: runtime.anonKey,
           refreshToken,
-          timeoutMs,
+          timeoutMs: requestTimeoutMs,
           onSessionRefreshed: (session) => {
             getRuntime();
             if (sessionAtStart !== getCloudAccountSessionGeneration()) {
@@ -1548,8 +1562,32 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
           if (accountViewInFlight.get(requestKey) === pending) accountViewInFlight.delete(requestKey);
         };
         pending.then(cleanup, cleanup);
+        // Settle the backoff from the probe itself, so it also counts when
+        // every caller has already stopped waiting.
+        pending.then(
+          (out) => { if (out && out.data != null) accountViewFailures.delete(failureKey); },
+          (e) => { if (e?.code !== "auth_session_changed") rememberAccountViewFailure(failureKey); },
+        );
       }
-      const out = await pending;
+      let responseTimer;
+      const responseDeadline = new Promise((resolve) => {
+        responseTimer = setTimeout(() => resolve(ACCOUNT_VIEW_STILL_PENDING), responseTimeoutMs);
+        if (typeof responseTimer.unref === "function") responseTimer.unref();
+      });
+      let out;
+      try {
+        out = await Promise.race([pending, responseDeadline]);
+      } finally {
+        clearTimeout(responseTimer);
+      }
+      if (out === ACCOUNT_VIEW_STILL_PENDING) {
+        // Back the fan-out off as before; the probe clears this on success.
+        rememberAccountViewFailure(failureKey);
+        if (getRuntime().debug) {
+          console.warn(`[LocalAPI] account view still pending after ${responseTimeoutMs}ms for ${usageSlug}; continuing in background`);
+        }
+        return "transient-timeout";
+      }
       getRuntime();
       // `null` here means the slug has no cloud equivalent, or the session
       // vanished mid-request — a routing/session fact, not an outage.
@@ -1646,6 +1684,32 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
 
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
+    // status.deepseek.com has no public JSON API or CORS, so the dashboard
+    // cannot probe it like the other providers. Relay it through the local app:
+    // fetchProviderServiceStatus("deepseek") fetches + parses the server-rendered
+    // page (with a 5-minute cache and 6s timeout in provider-status.js) and we
+    // return a Statuspage.io-shaped payload the existing dashboard parser reads.
+    if (p === "/api/deepseek-status") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method !== "GET" && method !== "HEAD") {
+        json(res, { error: "Method Not Allowed" }, 405);
+        return true;
+      }
+      try {
+        const reading = await fetchProviderServiceStatus("deepseek");
+        if (!reading) {
+          json(res, { error: "DeepSeek status unavailable" }, 502);
+          return true;
+        }
+        json(res, {
+          page: { updated_at: reading.updated_at },
+          status: { indicator: reading.indicator, description: reading.description || "" },
+        });
+      } catch (error) {
+        json(res, { error: `DeepSeek status probe error: ${error?.message || error}` }, 502);
+      }
+      return true;
+    }
     if (p === "/api/local-usage") {
       if (!isAuthorizedLocalMutation(req)) { json(res, { code: "unauthorized" }, 401); return true; }
       try {
@@ -2836,7 +2900,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
               instance_key: dshInstanceKey,
               instance_label: dshRootLabels.get(dshInstanceKey) || dshRootLabelFromKey(dshInstanceKey),
             } : {}),
-            totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" },
+            totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, conversation_count: 0, total_cost_usd: "0" },
             models: new Map(),
           });
         }
@@ -2848,8 +2912,12 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
         sa.totals.cached_input_tokens += row.cached_input_tokens || 0;
         sa.totals.cache_creation_input_tokens += row.cache_creation_input_tokens || 0;
         sa.totals.reasoning_output_tokens += row.reasoning_output_tokens || 0;
+        // Request-only sources (#948: credit-billed transcripts that report no
+        // tokens) carry their activity solely as conversation_count — thread it
+        // through so the dashboard can surface "0 tokens / N requests".
+        sa.totals.conversation_count += row.conversation_count || 0;
         if (!sa.models.has(mdl))
-          sa.models.set(mdl, { model: mdl, model_id: mdl, pricing: getModelPricingInfo(mdl, { source: src }), totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, total_cost_usd: "0" } });
+          sa.models.set(mdl, { model: mdl, model_id: mdl, pricing: getModelPricingInfo(mdl, { source: src }), totals: { total_tokens: 0, billable_total_tokens: 0, input_tokens: 0, output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, conversation_count: 0, total_cost_usd: "0" } });
         const ma = sa.models.get(mdl);
         const reportedCost = ["grok", "cline"].includes(src) && Number(row.total_cost_usd) > 0;
         const costSource = reportedCost ? "provider_reported" : "model_pricing";
@@ -2861,6 +2929,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
         ma.totals.cached_input_tokens += row.cached_input_tokens || 0;
         ma.totals.cache_creation_input_tokens += row.cache_creation_input_tokens || 0;
         ma.totals.reasoning_output_tokens += row.reasoning_output_tokens || 0;
+        ma.totals.conversation_count += row.conversation_count || 0;
         // Price each row, exactly as aggregateByDay does for the hero (#653).
         // computeRowCost is not linear for models with a Fast tier or
         // long-context rates: priority_* / long_context_* mark a subset of the
@@ -3799,7 +3868,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
 
     // --- usage-limits ---
     if (p === "/functions/tokentracker-usage-limits") {
-      const { getUsageLimits, resetUsageLimitsCache } = require("./usage-limits");
+      const { getUsageLimits, resetUsageLimitsCache, normalizeHiddenProviders } = require("./usage-limits");
       try {
         // Devin quota is opt-in (Settings > Usage & Limits > Providers). An
         // explicit devin=1 without local authentication is rejected before any
@@ -3810,7 +3879,14 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
         const localAuthorized = isAuthorizedLocalMutation(req);
         const devinParam = url.searchParams.get("devin");
         const devinEnabled = devinParam === "1" || devinParam === "true";
-        if (devinEnabled && !localAuthorized) {
+        // Provider visibility gate (#956): hidden=<csv> names provider rows to
+        // skip entirely — no upstream call, no credential read. Like devin=1,
+        // an explicit list is honored only together with the loopback auth
+        // header (letting an unauthenticated caller scope the fetch would let
+        // it pick exactly which credentials to leave alone). Unknown ids are
+        // dropped by the normalizer, so the gate only ever narrows.
+        const hiddenProviders = normalizeHiddenProviders(url.searchParams.get("hidden"));
+        if ((devinEnabled || hiddenProviders) && !localAuthorized) {
           json(res, { error: "Unauthorized" }, 401);
           return true;
         }
@@ -3828,6 +3904,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null, trackerDataDir
           // cooldown) — an explicit user refresh should hit upstream.
           forceRefresh,
           devinEnabled,
+          hiddenProviders,
         });
         json(res, data);
       } catch (e) {

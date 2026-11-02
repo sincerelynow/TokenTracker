@@ -394,7 +394,7 @@ test("Codex root metadata invalidates sidecar cache and stays browser-only", asy
   fs.writeFileSync(path.join(sessionsDir, `rollout-${sessionId}.jsonl`), `${[
     { timestamp: "2026-09-04T01:00:00Z", type: "session_meta", payload: { id: sessionId, cwd: path.join(home, "workspace") } },
     { timestamp: "2026-09-04T01:00:01Z", type: "turn_context", payload: { model: "gpt-5.6-sol" } },
-    { timestamp: "2026-09-04T01:00:02Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 5, output_tokens: 2 } } } },
+    { timestamp: "2026-09-04T01:00:02Z", type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 5, output_tokens: 2, total_tokens: 7 } } } },
   ].map(JSON.stringify).join("\n")}\n`);
 
   const first = await buildSessionAnalytics({ home, force: true });

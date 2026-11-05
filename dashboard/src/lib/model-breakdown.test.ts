@@ -3,11 +3,33 @@ import {
   buildAllModels,
   buildFleetData,
   buildTopModels,
+  hasModelSpeedTiers,
   hasModelTokenSplits,
+  modelSpeedTierMultiplier,
+  modelSpeedTierStandard,
   modelTokenSplitsTotal,
 } from "./model-breakdown";
 
 describe("buildFleetData", () => {
+  it("merges Codex speed tiers and requests into CODEX ALL without changing root rows", () => {
+    const fleet = buildFleetData({ sources: [1, 2].map((n) => {
+      const totals = { billable_total_tokens: 100 * n, input_tokens: 100 * n,
+        conversation_count: n, total_cost_usd: n,
+        priority_input_tokens: 20 * n, priority_cost_usd: 0.2 * n,
+        ultrafast_input_tokens: 30 * n, ultrafast_cost_usd: 0.6 * n };
+      return { source: `codex-root:root-${n}1234567`, totals,
+        models: [{ model_id: "gpt-6.1-sol", totals }] };
+    }) });
+    const aggregate = fleet.find((entry: any) => entry.isSyntheticAggregate);
+    expect(aggregate.requests).toBe(3);
+    expect(aggregate.models[0].requests).toBe(3);
+    expect(aggregate.models[0].tiers.priority.tokens.input).toBe(60);
+    expect(aggregate.models[0].tiers.ultrafast.tokens.input).toBe(90);
+    expect(aggregate.models[0].tiers.priority.cost).toBeCloseTo(0.6);
+    const roots = fleet.filter((entry: any) => !entry.isSyntheticAggregate);
+    expect(roots.map((entry: any) => entry.models[0].tiers.priority.tokens.input).sort((a: number, b: number) => a - b)).toEqual([20, 40]);
+    expect(buildAllModels(fleet)[0].tiers).toEqual(aggregate.models[0].tiers);
+  });
   it.each(["codex", "dsh"])("sums all model token splits across %s roots and legacy usage once", (family) => {
     const model = family === "codex" ? "gpt-6-sol" : "deepseek-v4-pro";
     const pricing = { status: "priced", source: "curated", input: 1, output: 2 };
@@ -233,7 +255,10 @@ describe("buildAllModels", () => {
         usage: 100,
         requests: 0,
         cost: 1,
+        unpriced: false,
         tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
+        tiers: null,
+        pricing: null,
         share: 50,
       },
       {
@@ -242,7 +267,10 @@ describe("buildAllModels", () => {
         usage: 80,
         requests: 0,
         cost: null,
+        unpriced: false,
         tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
+        tiers: null,
+        pricing: null,
         share: 40,
       },
       {
@@ -251,7 +279,10 @@ describe("buildAllModels", () => {
         usage: 20,
         requests: 0,
         cost: 0.2,
+        unpriced: false,
         tokens: { input: 0, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 },
+        tiers: null,
+        pricing: null,
         share: 10,
       },
     ]);
@@ -292,10 +323,96 @@ describe("buildAllModels", () => {
         usage: 150,
         requests: 0,
         cost: 1.5,
+        unpriced: false,
         tokens: { input: 30, output: 15, cached: 95, cacheCreate: 9, reasoning: 1 },
+        tiers: null,
+        pricing: null,
         share: 100,
       },
     ]);
+  });
+
+  it("keeps the unpriced flag on aggregated rows when any tool lacks a published rate", () => {
+    const models = buildAllModels([
+      {
+        label: "CODEX",
+        models: [
+          {
+            id: "terra",
+            name: "gpt-6.1-terra",
+            usage: 70,
+            cost: null,
+            pricing: { status: "unpriced" },
+            costSource: "curated",
+          },
+          {
+            id: "reported",
+            name: "reported-model",
+            usage: 10,
+            cost: 0.2,
+            pricing: { status: "unpriced" },
+            costSource: "provider_reported",
+          },
+        ],
+      },
+      {
+        label: "CURSOR",
+        models: [
+          {
+            id: "terra",
+            name: "gpt-6.1-terra",
+            usage: 30,
+            cost: null,
+            pricing: { status: "priced" },
+            costSource: "curated",
+          },
+        ],
+      },
+    ]);
+
+    // One unpriced contributor flags the merged row even though the other
+    // tool prices the same model; a provider-reported cost never flags its
+    // row, and rows without pricing metadata stay unflagged.
+    expect(models).toMatchObject([
+      { id: "gpt-6.1-terra", usage: 100, cost: null, unpriced: true },
+      { id: "reported-model", unpriced: false },
+    ]);
+  });
+
+  it("ignores request-only contributors when aggregating the unpriced flag", () => {
+    const models = buildAllModels([
+      {
+        label: "CODEX",
+        models: [
+          {
+            id: "shared",
+            name: "shared-model",
+            usage: 0,
+            requests: 5,
+            cost: null,
+            pricing: { status: "unpriced" },
+            costSource: "curated",
+          },
+        ],
+      },
+      {
+        label: "CURSOR",
+        models: [
+          {
+            id: "shared",
+            name: "shared-model",
+            usage: 50,
+            cost: null,
+            pricing: { status: "priced" },
+            costSource: "curated",
+          },
+        ],
+      },
+    ]);
+
+    // The token-backed contributor is priced and the request-only one books
+    // no cost either way, so the merged row must not be flagged.
+    expect(models).toMatchObject([{ id: "shared-model", usage: 50, unpriced: false }]);
   });
 
   it("carries API token totals through buildFleetData provider models", () => {
@@ -330,10 +447,142 @@ describe("buildAllModels", () => {
         requests: 0,
         cost: 0,
         tokens: { input: 100, output: 20, cached: 170, cacheCreate: 5, reasoning: 5 },
+        tiers: null,
         pricing: null,
         costSource: null,
       },
     ]);
+  });
+});
+
+describe("speed tiers (issue 886)", () => {
+  const tierTotals = {
+    billable_total_tokens: 300,
+    input_tokens: 100,
+    output_tokens: 20,
+    cached_input_tokens: 170,
+    cache_creation_input_tokens: 5,
+    reasoning_output_tokens: 5,
+    total_cost_usd: "2.000000",
+    priority_input_tokens: 60,
+    priority_output_tokens: 10,
+    priority_cost_usd: "0.700000",
+    ultrafast_output_tokens: 4,
+    ultrafast_cost_usd: "1.200000",
+  };
+
+  it("extracts observed speed tiers and the standard residual in buildFleetData", () => {
+    const fleet = buildFleetData({
+      sources: [
+        {
+          source: "codex",
+          totals: { billable_total_tokens: 300 },
+          models: [
+            {
+              model_id: "gpt-6.1-sol",
+              totals: tierTotals,
+              pricing: { priority_multiplier: 2, ultrafast_multiplier: 6 },
+            },
+          ],
+        },
+      ],
+    });
+    const model = fleet[0].models[0];
+    expect(model.tiers).toEqual({
+      priority: {
+        tokens: { input: 60, output: 10, cached: 0, cacheCreate: 0, reasoning: 0 },
+        cost: 0.7,
+      },
+      ultrafast: {
+        tokens: { input: 0, output: 4, cached: 0, cacheCreate: 0, reasoning: 0 },
+        cost: 1.2,
+      },
+    });
+    expect(hasModelSpeedTiers(model)).toBe(true);
+    expect(modelSpeedTierMultiplier(model, "priority")).toBe(2);
+    expect(modelSpeedTierMultiplier(model, "ultrafast")).toBe(6);
+    const standard = modelSpeedTierStandard(model);
+    expect(standard?.tokens).toEqual({
+      input: 40,
+      output: 6,
+      cached: 170,
+      cacheCreate: 5,
+      reasoning: 5,
+    });
+    // Model cost minus both tier costs — the residual the backend leaves to
+    // the standard tier.
+    expect(standard?.cost).toBeCloseTo(0.1, 10);
+  });
+
+  it("keeps tier-less models tier-less and drops empty standard rows", () => {
+    const fleet = buildFleetData({
+      sources: [
+        {
+          source: "claude",
+          totals: { billable_total_tokens: 10 },
+          models: [{ model_id: "claude-sonnet", totals: { billable_total_tokens: 10 } }],
+        },
+      ],
+    });
+    const model = fleet[0].models[0];
+    expect(model.tiers).toBeNull();
+    expect(hasModelSpeedTiers(model)).toBe(false);
+    expect(modelSpeedTierStandard(model)).toBeNull();
+    expect(modelSpeedTierMultiplier(model, "priority")).toBe(0);
+  });
+
+  it("merges tier subsets when the same model is combined across tools", () => {
+    const models = buildAllModels([
+      {
+        label: "CODEX",
+        models: [
+          {
+            id: "gpt-6.1-sol",
+            name: "gpt-6.1-sol",
+            usage: 100,
+            cost: 2,
+            pricing: { priority_multiplier: 2, ultrafast_multiplier: 6 },
+            tiers: {
+              priority: { tokens: { input: 60, output: 10, cached: 0, cacheCreate: 0, reasoning: 0 }, cost: 0.7 },
+            },
+          },
+        ],
+      },
+      {
+        label: "CURSOR",
+        models: [
+          {
+            id: "gpt-6.1-sol",
+            name: "gpt-6.1-sol",
+            usage: 50,
+            cost: 1,
+            tiers: {
+              priority: { tokens: { input: 10, output: 0, cached: 0, cacheCreate: 0, reasoning: 0 }, cost: 0.1 },
+              ultrafast: { tokens: { input: 0, output: 4, cached: 0, cacheCreate: 0, reasoning: 0 }, cost: 1.2 },
+            },
+          },
+        ],
+      },
+    ]);
+    expect(models[0].tiers.priority.tokens).toEqual({
+      input: 70,
+      output: 10,
+      cached: 0,
+      cacheCreate: 0,
+      reasoning: 0,
+    });
+    expect(models[0].tiers.priority.cost).toBeCloseTo(0.8, 10);
+    expect(models[0].tiers.ultrafast.tokens).toEqual({
+      input: 0,
+      output: 4,
+      cached: 0,
+      cacheCreate: 0,
+      reasoning: 0,
+    });
+    expect(models[0].tiers.ultrafast.cost).toBe(1.2);
+    // Pricing info (tier multipliers) survives the merge from the first
+    // source that carries it.
+    expect(models[0].pricing).toEqual({ priority_multiplier: 2, ultrafast_multiplier: 6 });
   });
 });
 

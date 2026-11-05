@@ -20,6 +20,7 @@ const { probeOpenclawSessionPluginState } = require("./openclaw-session-plugin")
 const { probeGrokHookState } = require("./grok-hook");
 const { resolveTrackerPaths } = require("./tracker-paths");
 const { resolveDeviceTokenPresence } = require("./cloud-device-token");
+const { inspectTraeCnAuth } = require("./trae-cn-config");
 const wsl = require("./wsl-probe");
 const { resolveCodexRootsSync } = require("./codex-roots");
 const { resolveDshRootsSync } = require("./dsh-roots");
@@ -236,6 +237,7 @@ async function collectTrackerDiagnostics({
     ? new Date(uploadThrottle.lastSuccessMs).toISOString()
     : null;
   const autoRetryAt = parseEpochMsToIso(autoRetry?.retryAtMs);
+  const traeCn = inspectTraeCnAuth({ home });
 
   return {
     ok: true,
@@ -279,6 +281,7 @@ async function collectTrackerDiagnostics({
       merge_policy:
         "Kiro IDE and Kiro CLI both emit source='kiro' in queue.jsonl so token, cost, heatmap, and leaderboard aggregations merge transparently. Use this block to distinguish sub-path contributions.",
     },
+    trae_cn: { ...traeCn, storage_path: redactValue(traeCn.storage_path, home) },
     scan_roots: {
       codex: describeScanRoots(scanRoots.codex),
       claude: describeScanRoots(scanRoots.claude),

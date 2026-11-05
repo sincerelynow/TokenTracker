@@ -1,3 +1,4 @@
+const { readCustomBackend } = require("./claude-backend");
 const cp = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -27,15 +28,16 @@ const {
   fetchCursorSandAccessStatus,
   fetchCursorSandUsageStatus,
 } = require("./cursor-config");
-const { fetchGrokLimits } = require("./grok-limits");
+const { fetchGrokLimits, grokTokenSubject, loadGrokAuthEntry } = require("./grok-limits");
 const { fetchZcodeLimits } = require("./zcode-limits");
 const { fetchOpencodeGoLimits } = require("./opencode-go-limits");
 const { fetchCommandcodeLimits } = require("./commandcode-limits");
-const { fetchDevinLimits } = require("./devin-limits");
+const { fetchDevinLimits, resolveDevinCacheIdentity } = require("./devin-limits");
 const { fetchQoderLimits, fetchQoderCnLimits } = require("./qoder-limits");
 const { fetchArkCodingPlanLimits } = require("./ark-coding-plan-limits");
 const { fetchArkAgentPlanLimits } = require("./ark-agent-plan-limits");
 const { fetchWorkbuddyLimits, fetchWorkbuddyAiLimits } = require("./workbuddy-limits");
+const { fetchDeepseekLimits } = require("./deepseek-limits");
 const { fetchProviderServiceStatus } = require("./provider-status");
 const { resolveKimiProfile } = require("./kimi-profile");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
@@ -55,7 +57,8 @@ const execFileAsync = promisify(cp.execFile);
 // is never served (or joined onto) a response fetched while it was on, an aggregate
 // fetched while Antigravity was enabled is never served after the opt-out is set,
 // and a response fetched for a visibility selection is never served to one made
-// under a different one. Key = `${devin}-${antigravity}[-<hidden ids>]`.
+// under a different one. Custom Claude origins also partition cached/in-flight
+// responses so switching endpoints cannot resurrect Anthropic quota bars.
 const USAGE_LIMITS_BASE_SELECTION_KEYS = ["off-on", "off-off", "on-on", "on-off"];
 const cacheBySelection = {};
 for (const key of USAGE_LIMITS_BASE_SELECTION_KEYS) cacheBySelection[key] = { data: null, expiresAtMs: 0 };
@@ -70,7 +73,7 @@ const USAGE_LIMITS_PROVIDER_IDS = Object.freeze([
   "claude", "codex", "cursor", "gemini", "kimi", "kiro", "grok",
   "copilot", "antigravity", "zcode", "opencodeGo", "commandCode",
   "qoder", "qoderCn", "codingPlan", "agentPlan", "devin",
-  "workbuddy", "workbuddyAi",
+  "workbuddy", "workbuddyAi", "deepseek",
 ]);
 
 // Normalize a caller-supplied hidden-provider list (array, Set, or
@@ -130,6 +133,7 @@ const ANTIGRAVITY_QUOTA_SUMMARY_URLS = Object.freeze([
   "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
   "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 ]);
+const ANTIGRAVITY_AVAILABLE_MODELS_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 const ANTIGRAVITY_USER_AGENT = "antigravity/2.9.1";
 const ANTIGRAVITY_TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 // Per-step ceilings for the Antigravity serial chain. `providerTimeoutMs` bounds the
@@ -172,6 +176,53 @@ const CODEX_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const OPENCODE_GO_LIMITS_CACHE_FILE = "opencode-go-usage-limits-cache.json";
 const OPENCODE_GO_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const OPENCODE_GO_LOCAL_ESTIMATE_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+// Cursor's web summary (cursor.com) and Grok Bot RPCs (api2.cursor.sh) both traverse
+// proxied routes where a timeout or 5xx previously blanked the card until the next
+// poll. Persist the last successful windows so a blip serves stale bars instead
+// (mirrors Claude / Codex / OpenCode Go).
+const CURSOR_LIMITS_CACHE_FILE = "cursor-usage-limits-cache.json";
+const CURSOR_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Gemini's Code Assist quota RPCs (cloudcode-pa.googleapis.com) are routinely
+// degraded on GFW-affected routes; a timeout or 5xx previously blanked the card
+// until the next poll. Persist the last successful windows so a blip serves
+// stale bars instead (mirrors Cursor / Codex / OpenCode Go).
+const GEMINI_LIMITS_CACHE_FILE = "gemini-usage-limits-cache.json";
+const GEMINI_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// The Kimi coding API (api.kimi.com / api.kimi.ai) is another proxied route where
+// a timeout or 5xx previously blanked the card until the next poll. Persist the
+// last successful windows so a blip serves stale bars instead
+// (mirrors Cursor / Codex / OpenCode Go).
+const KIMI_LIMITS_CACHE_FILE = "kimi-usage-limits-cache.json";
+const KIMI_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Grok Build's billing proxy (cli-chat-proxy.grok.com) sits behind the same kind of
+// proxied routes where a timeout or 5xx previously blanked the card until the next
+// poll. Persist the last successful windows so a blip serves stale bars instead
+// (mirrors Claude / Codex / Cursor).
+const GROK_LIMITS_CACHE_FILE = "grok-usage-limits-cache.json";
+const GROK_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Kiro's quota windows come from a local kiro-cli round-trip (2s version probe +
+// 20s per attempt) whose upstream call can time out or return an unparseable
+// panel. Persist the last successful windows so a blip serves stale bars instead
+// (mirrors Claude / Codex / OpenCode Go / Cursor).
+const KIRO_LIMITS_CACHE_FILE = "kiro-usage-limits-cache.json";
+const KIRO_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// kiro-cli persists the signed-in account's CodeWhisperer profile ARN — a
+// non-secret resource id — alongside its tokens in this file. It is the cache
+// partition key, never the token itself.
+const KIRO_AUTH_TOKEN_FILE = "kiro-auth-token.json";
+// api.github.com is the most stable of the network providers, but a timeout or 5xx
+// still blanks the Copilot card until the next poll. Persist the last successful
+// windows so a blip serves stale bars instead (mirrors Claude / Codex / OpenCode Go /
+// Cursor).
+const COPILOT_LIMITS_CACHE_FILE = "copilot-usage-limits-cache.json";
+const COPILOT_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Devin's GetPlanStatus RPC (server.codeium.com) is the only source of its
+// daily/weekly quota windows — window state lives server-side. A transient
+// timeout / 5xx previously blanked the card until the next poll — persist the
+// last successful windows so a blip serves stale bars instead
+// (mirrors OpenCode Go / Cursor).
+const DEVIN_LIMITS_CACHE_FILE = "devin-usage-limits-cache.json";
+const DEVIN_LIMITS_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 // A 429 from the usage endpoint carries a long `retry-after` (often 20+ minutes). Persist
 // the cooldown so every surface — this process, the menu bar app's embedded server, a later
 // restart — stops calling until it expires. Hammering during the cooldown just renews the
@@ -860,11 +911,11 @@ function normalizeCursorSandUsageStatus(body, { eligible = true } = {}) {
   return buildWindow({ usedPercent, resetAt, windowSeconds });
 }
 
-async function fetchCursorLimits({ home, fetchImpl = fetch } = {}) {
-  if (!isCursorInstalled({ home })) {
+async function fetchCursorLimits({ home, env, fetchImpl = fetch } = {}) {
+  if (!isCursorInstalled({ home, env })) {
     return { configured: false };
   }
-  const auth = extractCursorAuth({ home });
+  const auth = extractCursorAuth({ home, env });
   if (!auth?.cookie || !auth?.accessToken) {
     return { configured: false };
   }
@@ -887,11 +938,18 @@ async function fetchCursorLimits({ home, fetchImpl = fetch } = {}) {
       error: null,
       ...normalizeCursorUsageSummary(body),
       quaternary_window: grokBotWindow,
+      // Internal cache-partition key (stripped before the payload is served).
+      cache_identity: auth.userId,
     };
   } catch (error) {
     return {
       configured: true,
       error: error?.message || "Unknown error",
+      // A session-expiry error is actionable (re-login) and must not be hidden
+      // behind the stale disk-cache fallback (opencode-go auth_error precedent).
+      // Internal marker — stripped before the payload is served.
+      ...(error?.code === "AUTH_EXPIRED" ? { auth_error: true } : {}),
+      cache_identity: auth.userId,
     };
   }
 }
@@ -964,7 +1022,9 @@ function kimiCredentialsExpired(creds, nowMs = Date.now()) {
 
 async function refreshKimiAccessToken({ refreshToken, profile, fetchImpl = fetch } = {}) {
   if (typeof refreshToken !== "string" || !refreshToken.trim()) {
-    throw new Error("Not logged in to Kimi. Run 'kimi' in Terminal to authenticate.");
+    const error = new Error("Not logged in to Kimi. Run 'kimi' in Terminal to authenticate.");
+    error.code = "AUTH_EXPIRED";
+    throw error;
   }
 
   const body = new URLSearchParams({
@@ -983,7 +1043,9 @@ async function refreshKimiAccessToken({ refreshToken, profile, fetchImpl = fetch
     body,
   });
   if (res.status === 401 || res.status === 403) {
-    throw new Error("Not logged in to Kimi. Run 'kimi' in Terminal to authenticate.");
+    const error = new Error("Not logged in to Kimi. Run 'kimi' in Terminal to authenticate.");
+    error.code = "AUTH_EXPIRED";
+    throw error;
   }
   if (!res.ok) {
     throw new Error(`Kimi token refresh failed (HTTP ${res.status})`);
@@ -1017,7 +1079,11 @@ async function fetchKimiUsage(accessToken, { profile, fetchImpl = fetch } = {}) 
     },
   });
   if (res.status === 401) {
-    throw new Error("token_expired");
+    // The retry-with-refresh path keys off this message; the code marks the
+    // error actionable (re-login) so the cache fallback never hides it.
+    const error = new Error("token_expired");
+    error.code = "AUTH_EXPIRED";
+    throw error;
   }
   if (!res.ok) {
     throw new Error(`Kimi API returned ${res.status}`);
@@ -1030,12 +1096,17 @@ async function fetchKimiLimits({ home, env, fetchImpl = fetch } = {}) {
   if (!profile.configured) {
     return { configured: false };
   }
-  if (profile.error) return { configured: true, error: profile.error };
+  // A profile misconfiguration (unsupported endpoints, non-file credential
+  // storage) is actionable — the user must fix their config — so it must not
+  // be hidden behind the stale disk-cache fallback. Internal marker —
+  // stripped before the payload is served.
+  if (profile.error) return { configured: true, error: profile.error, config_error: true };
   const creds = loadKimiCredentials({ profile });
   let accessToken = typeof creds?.access_token === "string" ? creds.access_token.trim() : "";
   if (!accessToken) {
     return { configured: false };
   }
+  const cacheIdentity = kimiProfileIdentity(profile);
   try {
     if (kimiCredentialsExpired(creds) && creds?.refresh_token) {
       accessToken = await refreshKimiAccessToken({
@@ -1063,11 +1134,18 @@ async function fetchKimiLimits({ home, env, fetchImpl = fetch } = {}) {
       configured: true,
       error: null,
       ...normalizeKimiUsageResponse(body),
+      // Internal cache-partition key (stripped before the payload is served).
+      cache_identity: cacheIdentity,
     };
   } catch (error) {
     return {
       configured: true,
       error: error?.message || "Unknown error",
+      // A session-expiry error is actionable (re-login) and must not be hidden
+      // behind the stale disk-cache fallback (opencode-go auth_error precedent).
+      // Internal marker — stripped before the payload is served.
+      ...(error?.code === "AUTH_EXPIRED" ? { auth_error: true } : {}),
+      cache_identity: cacheIdentity,
     };
   }
 }
@@ -1199,6 +1277,12 @@ async function extractGeminiOauthClientCredentials({ commandRunner, home } = {})
   return { ...GEMINI_CLI_FALLBACK_OAUTH_CLIENT };
 }
 
+// Shared by the refresh-401 path, the missing-credentials path, and the quota
+// endpoint's 401: all three mean the Google OAuth session is gone. Re-login is
+// actionable, so none of them may be hidden behind the stale disk-cache
+// fallback (opencode-go auth_error precedent).
+const GEMINI_NOT_LOGGED_IN_MESSAGE = "Not logged in to Gemini. Run 'gemini' in Terminal to authenticate.";
+
 async function refreshGeminiAccessToken({
   refreshToken,
   home,
@@ -1224,7 +1308,14 @@ async function refreshGeminiAccessToken({
     body,
   });
   if (!res.ok) {
-    throw new Error("Not logged in to Gemini. Run 'gemini' in Terminal to authenticate.");
+    const error = new Error(GEMINI_NOT_LOGGED_IN_MESSAGE);
+    // Confirmed credential failures only (invalid_grant = 400, invalid_client
+    // = 401/403): a transient 429/5xx from the token endpoint must stay
+    // cache-eligible so the stale fallback can still serve bars.
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      error.code = "AUTH_EXPIRED";
+    }
+    throw error;
   }
 
   const json = await res.json();
@@ -1365,17 +1456,37 @@ async function fetchGeminiLimits({ home, env, fetchImpl = fetch, commandRunner }
   if (!settings && !credentials) {
     return { configured: false };
   }
+  // An unsupported auth mode is a stable, actionable configuration state: the
+  // quota RPC can never succeed here and stale OAuth-era bars would be
+  // misleading, so it punches through the cache like an auth error.
   if (selectedType === "api-key") {
-    return { configured: true, error: "Gemini API key auth not supported. Use Google account (OAuth) instead." };
+    return {
+      configured: true,
+      error: "Gemini API key auth not supported. Use Google account (OAuth) instead.",
+      auth_error: true,
+    };
   }
   if (selectedType === "vertex-ai") {
-    return { configured: true, error: "Gemini Vertex AI auth not supported. Use Google account (OAuth) instead." };
+    return {
+      configured: true,
+      error: "Gemini Vertex AI auth not supported. Use Google account (OAuth) instead.",
+      auth_error: true,
+    };
   }
 
   const creds = credentials;
   if (!creds?.access_token) {
-    return { configured: true, error: "Not logged in to Gemini. Run 'gemini' in Terminal to authenticate." };
+    return {
+      configured: true,
+      error: GEMINI_NOT_LOGGED_IN_MESSAGE,
+      auth_error: true,
+    };
   }
+
+  // The Google account email from the local id_token JWT partitions the disk
+  // cache (zcode login-identity precedent). Decoded before the network work —
+  // it cannot throw — so the failure path below still knows who we serve for.
+  const claims = decodeJwtPayload(creds.id_token);
 
   try {
     let accessToken = creds.access_token;
@@ -1390,7 +1501,6 @@ async function fetchGeminiLimits({ home, env, fetchImpl = fetch, commandRunner }
       });
     }
 
-    const claims = decodeJwtPayload(creds.id_token);
     const codeAssist = await loadGeminiCodeAssistStatus(accessToken, { fetchImpl });
     const res = await fetchImpl("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota", {
       method: "POST",
@@ -1401,7 +1511,18 @@ async function fetchGeminiLimits({ home, env, fetchImpl = fetch, commandRunner }
       body: JSON.stringify(codeAssist.projectId ? { project: codeAssist.projectId } : {}),
     });
     if (res.status === 401) {
-      throw new Error("Not logged in to Gemini. Run 'gemini' in Terminal to authenticate.");
+      const error = new Error(GEMINI_NOT_LOGGED_IN_MESSAGE);
+      error.code = "AUTH_EXPIRED";
+      throw error;
+    }
+    if (res.status === 403) {
+      // PERMISSION_DENIED (seen for Enterprise accounts, gemini-cli#25512):
+      // re-login cannot fix it, but stale bars for a project the account can
+      // no longer see would mislead — punch through like an auth error while
+      // keeping the displayed message unchanged.
+      const error = new Error(`Gemini API error: HTTP ${res.status}`);
+      error.code = "AUTH_EXPIRED";
+      throw error;
     }
     if (!res.ok) {
       throw new Error(`Gemini API error: HTTP ${res.status}`);
@@ -1415,11 +1536,19 @@ async function fetchGeminiLimits({ home, env, fetchImpl = fetch, commandRunner }
         email: claims?.email || null,
         tier: codeAssist.tier,
       }),
+      // Internal cache-partition key (stripped before the payload is served):
+      // the same non-secret id the payload already surfaces as account_email.
+      cache_identity: claims?.email || null,
     };
   } catch (error) {
     return {
       configured: true,
       error: error?.message || "Unknown error",
+      // A session-expiry error is actionable (re-login) and must not be hidden
+      // behind the stale disk-cache fallback. Internal marker — stripped
+      // before the payload is served.
+      ...(error?.code === "AUTH_EXPIRED" ? { auth_error: true } : {}),
+      cache_identity: claims?.email || null,
     };
   }
 }
@@ -1672,6 +1801,112 @@ function readKiroCreditsSummary({ home = os.homedir() } = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Kiro limits disk cache — last good windows parsed from the kiro-cli panel.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveKiroLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", KIRO_LIMITS_CACHE_FILE);
+}
+
+function hasKiroWindow(limits) {
+  return Boolean(limits?.primary_window || limits?.secondary_window);
+}
+
+// Kiro windows carry `reset_at` as an ISO string (the plan's monthly reset date,
+// the bonus credits' own expiry). A window whose reset has already passed is
+// stale data, not a usable fallback, so drop it. Windows without a reset stamp
+// are kept — the overall cached_at max-age gate already bounds them.
+function isKiroCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function normalizeKiroCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = KIRO_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    plan_name: typeof raw?.plan_name === "string" ? raw.plan_name : null,
+    primary_window: isKiroCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isKiroCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasKiroWindow(cached) ? cached : null;
+}
+
+// The signed-in Kiro account partitions the cache (zcode / Cursor login-identity
+// precedent): the id is the CodeWhisperer profile ARN kiro-cli itself persists
+// next to its tokens. Reads require the stored identity to match the current
+// one, and a write without an identity is refused — after an account switch the
+// previous account's windows must never resurface as another login's fallback.
+function readKiroLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveKiroLimitsCachePath({ home }), "utf8"));
+    const entry = parsed?.kiro;
+    if (entry?.identity !== identity) return null;
+    return normalizeKiroCachedLimits(entry, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeKiroLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasKiroWindow(limits)) return;
+  const cachePath = resolveKiroLimitsCachePath({ home });
+  const payload = {
+    kiro: {
+      identity,
+      plan_name: limits.plan_name || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function resolveKiroAuthIdentity({ home } = {}) {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(
+        path.join(home || os.homedir(), ".aws", "sso", "cache", KIRO_AUTH_TOKEN_FILE),
+        "utf8",
+      ),
+    );
+    const profileArn = parsed?.profileArn;
+    return typeof profileArn === "string" && profileArn ? profileArn : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+// Any login-shaped CLI output (not-logged-in banner, oauth error, auth portal
+// failure) collapses into one "Not logged in to Kiro..." error inside
+// parseKiroUsageOutput, so the slot's error string is the whole auth story.
+function isKiroAuthError(message) {
+  return /not logged in to kiro|kiro-cli login|login required|oauth error|failed to initialize auth portal/i.test(
+    String(message || ""),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GitHub Copilot — `GET https://api.github.com/copilot_internal/user`
 // Reuses the OAuth token from the user's existing Copilot install. Older clients
 // keep it in plaintext (`~/.config/github-copilot/{apps,hosts}.json`); newer
@@ -1692,7 +1927,10 @@ const COPILOT_AUTH_DB_SQL =
   "SELECT user_login, auth_authority, scopes, token_schema_version, hex(token_ciphertext) AS token_hex, "
   + "last_used_at, updated_at FROM oauth_tokens ORDER BY last_used_at DESC, updated_at DESC";
 
-function readPlaintextCopilotOauthToken({ home }) {
+// Returns { token, user } for the first usable entry — `user` is the non-secret
+// GitHub login stored alongside the OAuth token by the editors that write these
+// files (absent on hand-rolled setups), or null when a token carries no login.
+function readPlaintextCopilotAuth({ home }) {
   const candidates = [
     path.join(home, ".config", "github-copilot", "apps.json"),
     path.join(home, ".config", "github-copilot", "hosts.json"),
@@ -1715,12 +1953,19 @@ function readPlaintextCopilotOauthToken({ home }) {
       if (!value || typeof value !== "object") continue;
       const token = typeof value.oauth_token === "string" ? value.oauth_token : "";
       if (!token) continue;
+      const user = typeof value.user === "string" && value.user.trim()
+        ? value.user.trim()
+        : null;
       const host = String(key).split(":")[0];
-      if (host === "github.com") return token;
-      if (!fallback) fallback = token;
+      if (host === "github.com") return { token, user };
+      if (!fallback) fallback = { token, user };
     }
   }
   return fallback;
+}
+
+function readPlaintextCopilotOauthToken({ home }) {
+  return readPlaintextCopilotAuth({ home })?.token || null;
 }
 
 function readMacosKeychainGenericPassword({ service, account, securityRunner } = {}) {
@@ -1863,6 +2108,14 @@ function readCopilotAuthDbRows({ home, sqliteReader, asyncReader = false } = {})
   return reader(dbPath, COPILOT_AUTH_DB_SQL, { label: "GitHub Copilot" });
 }
 
+// The non-secret GitHub login of the row the token came from — used as the
+// cache-partition identity for the Copilot limits fallback.
+function copilotRowLogin(row) {
+  return typeof row?.user_login === "string" && row.user_login.trim()
+    ? row.user_login.trim()
+    : null;
+}
+
 function resolveCopilotAuthDbTokenFromRows(rows, {
   platform = process.platform,
   securityRunner,
@@ -1878,7 +2131,7 @@ function resolveCopilotAuthDbTokenFromRows(rows, {
     const schemaVersion = parseCopilotAuthDbSchemaVersion(row?.token_schema_version);
     if (schemaVersion === 0) {
       const plaintextToken = decodeCopilotSchemaV0Token(row);
-      if (plaintextToken) return plaintextToken;
+      if (plaintextToken) return { token: plaintextToken, login: copilotRowLogin(row) };
       continue;
     }
 
@@ -1897,7 +2150,7 @@ function resolveCopilotAuthDbTokenFromRows(rows, {
     }
     if (!keyBase64) continue;
     const token = decryptCopilotAuthDbToken(keyBase64, ciphertextHex);
-    if (token) return token;
+    if (token) return { token, login: copilotRowLogin(row) };
   }
   return null;
 }
@@ -1915,7 +2168,7 @@ async function resolveCopilotAuthDbTokenFromRowsAsync(rows, {
     const schemaVersion = parseCopilotAuthDbSchemaVersion(row?.token_schema_version);
     if (schemaVersion === 0) {
       const plaintextToken = decodeCopilotSchemaV0Token(row);
-      if (plaintextToken) return plaintextToken;
+      if (plaintextToken) return { token: plaintextToken, login: copilotRowLogin(row) };
       continue;
     }
 
@@ -1931,7 +2184,7 @@ async function resolveCopilotAuthDbTokenFromRowsAsync(rows, {
     }
     if (!keyBase64) continue;
     const token = decryptCopilotAuthDbToken(keyBase64, ciphertextHex);
-    if (token) return token;
+    if (token) return { token, login: copilotRowLogin(row) };
   }
   return null;
 }
@@ -1943,7 +2196,7 @@ function readCopilotAuthDbToken({ home, platform = process.platform, securityRun
   } catch (_e) {
     return null;
   }
-  return resolveCopilotAuthDbTokenFromRows(rows, { platform, securityRunner });
+  return resolveCopilotAuthDbTokenFromRows(rows, { platform, securityRunner })?.token || null;
 }
 
 async function readCopilotAuthDbTokenAsync({ home, platform = process.platform, securityRunner, sqliteReader } = {}) {
@@ -1953,7 +2206,50 @@ async function readCopilotAuthDbTokenAsync({ home, platform = process.platform, 
   } catch (_e) {
     return null;
   }
-  return resolveCopilotAuthDbTokenFromRowsAsync(rows, { platform, securityRunner });
+  const resolved = await resolveCopilotAuthDbTokenFromRowsAsync(rows, { platform, securityRunner });
+  return resolved?.token || null;
+}
+
+// Token + cache-partition identity in one resolution: the identity is the
+// non-secret GitHub login of whichever auth source produced the token
+// (the plaintext files' `user` field, or the auth.db row's `user_login`).
+// A token without a readable login yields identity null — the cache write
+// side refuses null identities.
+function readCopilotAuth({
+  home = os.homedir(),
+  platform = process.platform,
+  securityRunner,
+  sqliteReader,
+} = {}) {
+  const plaintext = readPlaintextCopilotAuth({ home });
+  if (plaintext?.token) return { token: plaintext.token, identity: plaintext.user };
+  // No plaintext token found — recover the live one from the encrypted auth.db.
+  let rows;
+  try {
+    rows = readCopilotAuthDbRows({ home, sqliteReader });
+  } catch (_e) {
+    return null;
+  }
+  const resolved = resolveCopilotAuthDbTokenFromRows(rows, { platform, securityRunner });
+  return resolved ? { token: resolved.token, identity: resolved.login } : null;
+}
+
+async function readCopilotAuthAsync({
+  home = os.homedir(),
+  platform = process.platform,
+  securityRunner,
+  sqliteReader,
+} = {}) {
+  const plaintext = readPlaintextCopilotAuth({ home });
+  if (plaintext?.token) return { token: plaintext.token, identity: plaintext.user };
+  let rows;
+  try {
+    rows = await readCopilotAuthDbRows({ home, sqliteReader, asyncReader: true });
+  } catch (_e) {
+    return null;
+  }
+  const resolved = await resolveCopilotAuthDbTokenFromRowsAsync(rows, { platform, securityRunner });
+  return resolved ? { token: resolved.token, identity: resolved.login } : null;
 }
 
 function readCopilotOauthToken({
@@ -1962,10 +2258,7 @@ function readCopilotOauthToken({
   securityRunner,
   sqliteReader,
 } = {}) {
-  const plaintext = readPlaintextCopilotOauthToken({ home });
-  if (plaintext) return plaintext;
-  // No plaintext token found — recover the live one from the encrypted auth.db.
-  return readCopilotAuthDbToken({ home, platform, securityRunner, sqliteReader });
+  return readCopilotAuth({ home, platform, securityRunner, sqliteReader })?.token || null;
 }
 
 async function readCopilotOauthTokenAsync({
@@ -1974,9 +2267,7 @@ async function readCopilotOauthTokenAsync({
   securityRunner,
   sqliteReader,
 } = {}) {
-  const plaintext = readPlaintextCopilotOauthToken({ home });
-  if (plaintext) return plaintext;
-  return readCopilotAuthDbTokenAsync({ home, platform, securityRunner, sqliteReader });
+  return (await readCopilotAuthAsync({ home, platform, securityRunner, sqliteReader }))?.token || null;
 }
 
 function copilotRequestHeaders(token) {
@@ -2061,12 +2352,13 @@ async function fetchCopilotLimits({
   sqliteReader,
 } = {}) {
   const otel = describeCopilotOtelStatus({ home, env });
-  const token = await readCopilotOauthTokenAsync({
+  const auth = await readCopilotAuthAsync({
     home: home || (env.HOME || os.homedir()),
     platform,
     securityRunner,
     sqliteReader,
   });
+  const token = auth?.token || null;
   if (!token) return { configured: false, ...otel };
 
   try {
@@ -2075,7 +2367,9 @@ async function fetchCopilotLimits({
       headers: copilotRequestHeaders(token),
     });
     if (res.status === 401 || res.status === 403) {
-      throw new Error("GitHub Copilot token rejected. Re-authenticate via GitHub Copilot CLI/extension.");
+      const authError = new Error("GitHub Copilot token rejected. Re-authenticate via GitHub Copilot CLI/extension.");
+      authError.code = "AUTH_EXPIRED";
+      throw authError;
     }
     if (!res.ok) {
       throw new Error(`GitHub Copilot API error: HTTP ${res.status}`);
@@ -2090,7 +2384,16 @@ async function fetchCopilotLimits({
     const chatWindow = buildCopilotWindow(snapshots.chat, resetIso);
 
     if (!premiumWindow && !chatWindow) {
-      return { configured: true, error: null, plan_name: planName, primary_window: null, secondary_window: null, ...otel };
+      return {
+        configured: true,
+        error: null,
+        plan_name: planName,
+        primary_window: null,
+        secondary_window: null,
+        // Internal cache-partition key (stripped before the payload is served).
+        cache_identity: auth.identity,
+        ...otel,
+      };
     }
 
     return {
@@ -2099,10 +2402,21 @@ async function fetchCopilotLimits({
       plan_name: planName,
       primary_window: premiumWindow,
       secondary_window: chatWindow,
+      // Internal cache-partition key (stripped before the payload is served).
+      cache_identity: auth.identity,
       ...otel,
     };
   } catch (error) {
-    return { configured: true, error: error?.message || "Unknown error", ...otel };
+    return {
+      configured: true,
+      error: error?.message || "Unknown error",
+      // A token-rejection error is actionable (re-authenticate) and must not be hidden
+      // behind the stale disk-cache fallback (opencode-go auth_error precedent).
+      // Internal marker — stripped before the payload is served.
+      ...(error?.code === "AUTH_EXPIRED" ? { auth_error: true } : {}),
+      cache_identity: auth.identity,
+      ...otel,
+    };
   }
 }
 
@@ -2112,11 +2426,16 @@ async function fetchKiroLimits({
   platform = process.platform,
   home = os.homedir(),
 } = {}) {
+  // Identity captured BEFORE the CLI runs: if the account switches while
+  // /usage is in flight, the write side can compare against a fresh read and
+  // refuse instead of stamping the previous account's panel under the new
+  // login. Internal marker — stripped before the payload is served.
+  const cacheIdentity = resolveKiroAuthIdentity({ home });
   const trackedCredits = readKiroCreditsSummary({ home });
   const binaryPath = await whichBinary("kiro-cli", { commandRunner });
   if (!binaryPath) {
     return trackedCredits
-      ? { configured: true, error: null, ...trackedCredits }
+      ? { configured: true, error: null, cache_identity: cacheIdentity, ...trackedCredits }
       : { configured: false };
   }
 
@@ -2174,6 +2493,7 @@ async function fetchKiroLimits({
           configured: true,
           error: null,
           ...parseKiroCommandResult(result, { now }),
+          cache_identity: cacheIdentity,
           ...(trackedCredits || {}),
         };
       } catch (error) {
@@ -2185,6 +2505,7 @@ async function fetchKiroLimits({
     return {
       configured: true,
       error: error?.message || "Unknown error",
+      cache_identity: cacheIdentity,
       ...(trackedCredits || {}),
     };
   }
@@ -2765,6 +3086,614 @@ function writeOpencodeGoLimitsCache(limits, { trackerDir, home, nowMs = Date.now
     fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
     fs.renameSync(tmpPath, cachePath);
   } catch (_error) {}
+}
+
+function resolveCursorLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", CURSOR_LIMITS_CACHE_FILE);
+}
+
+function hasCursorWindow(limits) {
+  return Boolean(
+    limits?.primary_window
+    || limits?.secondary_window
+    || limits?.tertiary_window
+    || limits?.quaternary_window,
+  );
+}
+
+// Cursor windows carry `reset_at` as an ISO string (billing-cycle end for the three
+// summary windows, the RPC's own expiry for the Grok Bot window). A window whose reset
+// has already passed is stale data, not a usable fallback, so drop it. Windows without
+// a reset stamp are kept — the overall cached_at max-age gate already bounds them.
+function isCursorCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function normalizeCursorCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = CURSOR_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    membership_type: typeof raw?.membership_type === "string" ? raw.membership_type : null,
+    primary_window: isCursorCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isCursorCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    tertiary_window: isCursorCacheWindowUsable(raw?.tertiary_window, { nowMs }) ? raw.tertiary_window : null,
+    quaternary_window: isCursorCacheWindowUsable(raw?.quaternary_window, { nowMs }) ? raw.quaternary_window : null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasCursorWindow(cached) ? cached : null;
+}
+
+// The signed-in Cursor account partitions the cache (zcode login-identity precedent):
+// the id is the non-secret normalized subject Cursor itself puts in the session cookie.
+// A single home holds one active login, so one stamped entry suffices; a read requires
+// the stored identity to match the current one, and a write without an identity is
+// refused — an unreadable login must never pin another account's bars in place.
+function readCursorLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveCursorLimitsCachePath({ home }), "utf8"));
+    const entry = parsed?.cursor;
+    if (entry?.identity !== identity) return null;
+    return normalizeCursorCachedLimits(entry, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeCursorLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasCursorWindow(limits)) return;
+  const cachePath = resolveCursorLimitsCachePath({ home });
+  const payload = {
+    cursor: {
+      identity,
+      membership_type: limits.membership_type || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      tertiary_window: limits.tertiary_window || null,
+      quaternary_window: limits.quaternary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+// Failure-only identity re-derivation for the cache fallback: when the provider slot's
+// result was produced by the outer timeout race, the fetcher's own identity field is
+// lost, so read the (still-local) state DB once to learn who we are serving for.
+function resolveCursorCacheIdentity({ home, env } = {}) {
+  try {
+    return extractCursorAuth({ home, env })?.userId || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function resolveGeminiLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", GEMINI_LIMITS_CACHE_FILE);
+}
+
+function hasGeminiWindow(limits) {
+  return Boolean(
+    limits?.primary_window
+    || limits?.secondary_window
+    || limits?.tertiary_window,
+  );
+}
+
+// Gemini windows carry `reset_at` as an ISO string (the Code Assist bucket's own
+// resetTime — daily for free-tier quotas). A window whose reset has already passed
+// is stale data, not a usable fallback, so drop it. Windows without a reset stamp
+// are kept — the overall cached_at max-age gate already bounds them.
+function isGeminiCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function normalizeGeminiCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = GEMINI_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    account_email: typeof raw?.account_email === "string" ? raw.account_email : null,
+    account_plan: typeof raw?.account_plan === "string" ? raw.account_plan : null,
+    primary_window: isGeminiCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isGeminiCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    tertiary_window: isGeminiCacheWindowUsable(raw?.tertiary_window, { nowMs }) ? raw.tertiary_window : null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasGeminiWindow(cached) ? cached : null;
+}
+
+// The signed-in Google account partitions the cache (zcode login-identity
+// precedent): the email decoded from the local id_token JWT is non-secret and is
+// the same id the payload already surfaces as account_email. GEMINI_HOME can aim
+// the credential lookup at a different installation, but the cache stays keyed by
+// account — a read requires the stored identity to match the account the current
+// credentials resolve to, and a write without an identity is refused: an
+// unreadable login must never pin another account's bars in place.
+function readGeminiLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveGeminiLimitsCachePath({ home }), "utf8"));
+    const entry = parsed?.gemini;
+    if (entry?.identity !== identity) return null;
+    return normalizeGeminiCachedLimits(entry, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeGeminiLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasGeminiWindow(limits)) return;
+  const cachePath = resolveGeminiLimitsCachePath({ home });
+  const payload = {
+    gemini: {
+      identity,
+      account_email: limits.account_email || null,
+      account_plan: limits.account_plan || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      tertiary_window: limits.tertiary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+// Failure-only identity re-derivation for the cache fallback: when the provider
+// slot's result was produced by the outer timeout race, the fetcher's own
+// identity field is lost, so decode the (still-local) id_token once to learn
+// who we are serving for.
+function resolveGeminiCacheIdentity({ home, env } = {}) {
+  try {
+    return decodeJwtPayload(loadGeminiCredentials({ home, env })?.id_token)?.email || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+// The active Kimi profile partitions the cache (ark profile_identity precedent):
+// mainland and global logins — and any KIMI_HOME override — resolve to different
+// endpoint-scoped credential slots, and one slot must never serve another's
+// windows. The profile home plus OAuth host is non-secret and derivable from
+// local files alone (the credential file holds no account id).
+function kimiProfileIdentity(profile) {
+  if (!profile?.home || !profile?.oauthHost) return null;
+  return `${profile.home}::${profile.oauthHost}`;
+}
+
+// Failure-only identity re-derivation for the cache fallback: when the provider
+// slot's result was produced by the outer timeout race, the fetcher's own
+// identity field is lost, so re-resolve the (still-local) Kimi profile.
+function resolveKimiCacheIdentity({ home, env } = {}) {
+  try {
+    return kimiProfileIdentity(resolveKimiProfile({ home, env }));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function resolveKimiLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", KIMI_LIMITS_CACHE_FILE);
+}
+
+function hasKimiWindow(limits) {
+  return Boolean(
+    limits?.primary_window
+    || limits?.secondary_window
+    || limits?.tertiary_window,
+  );
+}
+
+// Kimi windows carry `reset_at` (ISO) when the API reports a cycle end; a window
+// whose reset has already passed is stale data, not a usable fallback, so drop
+// it. Windows without a reset stamp are kept — the overall cached_at max-age
+// gate already bounds them.
+function isKimiCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function normalizeKimiCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = KIMI_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    membership_level: typeof raw?.membership_level === "string" ? raw.membership_level : null,
+    subscription_type: typeof raw?.subscription_type === "string" ? raw.subscription_type : null,
+    parallel_limit: Number.isFinite(raw?.parallel_limit) ? raw.parallel_limit : null,
+    primary_window: isKimiCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isKimiCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    tertiary_window: isKimiCacheWindowUsable(raw?.tertiary_window, { nowMs }) ? raw.tertiary_window : null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasKimiWindow(cached) ? cached : null;
+}
+
+function readKimiLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveKimiLimitsCachePath({ home }), "utf8"));
+    const entry = parsed?.kimi;
+    if (entry?.identity !== identity) return null;
+    return normalizeKimiCachedLimits(entry, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeKimiLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasKimiWindow(limits)) return;
+  const cachePath = resolveKimiLimitsCachePath({ home });
+  const payload = {
+    kimi: {
+      identity,
+      membership_level: limits.membership_level || null,
+      subscription_type: limits.subscription_type || null,
+      parallel_limit: Number.isFinite(limits.parallel_limit) ? limits.parallel_limit : null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      tertiary_window: limits.tertiary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function resolveGrokLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", GROK_LIMITS_CACHE_FILE);
+}
+
+function hasGrokWindow(limits) {
+  return Boolean(limits?.primary_window || limits?.secondary_window);
+}
+
+// Grok windows carry `reset_at` as an ISO string — the billing-period end shared
+// by the pool, on-demand, and per-product windows. A window whose reset has
+// already passed is stale data, not a usable fallback, so drop it. Windows
+// without a reset stamp are kept — the overall cached_at max-age gate already
+// bounds them (mirrors Cursor).
+function isGrokCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function resolveCopilotLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", COPILOT_LIMITS_CACHE_FILE);
+}
+
+function hasCopilotWindow(limits) {
+  return Boolean(limits?.primary_window || limits?.secondary_window);
+}
+
+// Copilot windows carry `reset_at` as an ISO string built from the monthly
+// quota_reset_date. A window whose reset has already passed is stale data, not a
+// usable fallback, so drop it. Windows without a reset stamp are kept — the overall
+// cached_at max-age gate already bounds them.
+function isCopilotCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function normalizeGrokCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = GROK_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    plan_label: typeof raw?.plan_label === "string" ? raw.plan_label : null,
+    period_type: typeof raw?.period_type === "string" ? raw.period_type : null,
+    monthly_credits_limit: raw?.monthly_credits_limit ?? null,
+    monthly_credits_used: raw?.monthly_credits_used ?? null,
+    credit_usage_percent: raw?.credit_usage_percent ?? null,
+    on_demand_cap: raw?.on_demand_cap ?? null,
+    on_demand_used: raw?.on_demand_used ?? null,
+    billing_period_start: typeof raw?.billing_period_start === "string" ? raw.billing_period_start : null,
+    primary_window: isGrokCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isGrokCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    // Per-product shares of the pool, not independent windows — each is gated
+    // by the same reset stamp as the pool window it attributes.
+    products: Array.isArray(raw?.products)
+      ? raw.products.filter((entry) => isGrokCacheWindowUsable(entry?.window, { nowMs }))
+      : [],
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasGrokWindow(cached) ? cached : null;
+}
+
+// The signed-in Grok account partitions the cache (zcode login-identity precedent):
+// the id is the non-secret OIDC `sub` claim inside the access token — the
+// credential itself never enters the id (no token fingerprint fallback: CodeQL
+// js/insufficient-password-hash precedent). auth.x.ai issues JWT access tokens
+// (RFC 9068), so the subject is present in practice; an opaque token yields no
+// identity and the cache is simply refused on both the write and the read path
+// (fail-closed) — an unattributable login must never pin another account's bars,
+// which a scope-key fallback cannot guarantee because `issuer::client_id` stays
+// constant across account switches.
+function readGrokLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveGrokLimitsCachePath({ home }), "utf8"));
+    const entry = parsed?.grok;
+    if (entry?.identity !== identity) return null;
+    return normalizeGrokCachedLimits(entry, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function normalizeCopilotCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = COPILOT_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    plan_name: typeof raw?.plan_name === "string" ? raw.plan_name : null,
+    primary_window: isCopilotCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isCopilotCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasCopilotWindow(cached) ? cached : null;
+}
+
+// The signed-in GitHub account partitions the cache (zcode login-identity precedent):
+// the id is the non-secret GitHub login stored alongside the OAuth token (the
+// plaintext files' `user` field, or the auth.db row's `user_login`). A single home
+// resolves one active token, so one stamped entry suffices; a read requires the stored
+// identity to match the current one, and a write without an identity is refused — an
+// unreadable login must never pin another account's bars in place.
+function readCopilotLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveCopilotLimitsCachePath({ home }), "utf8"));
+    const entry = parsed?.copilot;
+    if (entry?.identity !== identity) return null;
+    return normalizeCopilotCachedLimits(entry, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeGrokLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasGrokWindow(limits)) return;
+  const cachePath = resolveGrokLimitsCachePath({ home });
+  const payload = {
+    grok: {
+      identity,
+      plan_label: limits.plan_label || null,
+      period_type: limits.period_type || null,
+      monthly_credits_limit: limits.monthly_credits_limit ?? null,
+      monthly_credits_used: limits.monthly_credits_used ?? null,
+      credit_usage_percent: limits.credit_usage_percent ?? null,
+      on_demand_cap: limits.on_demand_cap ?? null,
+      on_demand_used: limits.on_demand_used ?? null,
+      billing_period_start: limits.billing_period_start || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      products: Array.isArray(limits.products) ? limits.products : [],
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function writeCopilotLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasCopilotWindow(limits)) return;
+  const cachePath = resolveCopilotLimitsCachePath({ home });
+  const payload = {
+    copilot: {
+      identity,
+      plan_name: limits.plan_name || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+// Failure-only identity re-derivation for the cache fallback: when the provider
+// slot's result was produced by the outer timeout race, the fetcher's own
+// identity field is lost, so read auth.json once to learn who we are serving for.
+// Opaque tokens yield null → the read is refused (fail-closed, see above).
+function resolveGrokCacheIdentity({ home, env } = {}) {
+  try {
+    return grokTokenSubject(loadGrokAuthEntry({ home, env })?.entry?.key);
+  } catch (_error) {
+    return null;
+  }
+}
+
+// Failure-only identity re-derivation for the cache fallback: when the provider slot's
+// result was produced by the outer timeout race, the fetcher's identity field is lost,
+// so re-resolve the (still-local) auth store — mirroring the token-source priority so
+// the identity always belongs to the account the token resolution would pick. Async
+// like the fetcher's own resolution so a failed poll never blocks the embedded
+// server's event loop on SQLite / Keychain.
+async function resolveCopilotCacheIdentity({
+  home = os.homedir(),
+  platform = process.platform,
+  securityRunner,
+  sqliteReader,
+} = {}) {
+  try {
+    const resolved = await readCopilotAuthAsync({ home, platform, securityRunner, sqliteReader });
+    return resolved?.identity || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function resolveDevinLimitsCachePath({ home } = {}) {
+  return path.join(home || os.homedir(), ".tokentracker", "tracker", DEVIN_LIMITS_CACHE_FILE);
+}
+
+function hasDevinWindow(limits) {
+  return Boolean(limits?.primary_window || limits?.secondary_window);
+}
+
+// Devin windows carry `reset_at` as an ISO string. A window whose reset has
+// already passed is stale data, not a usable fallback, so drop it. Windows
+// without a reset stamp are kept — the overall cached_at max-age gate already
+// bounds them.
+function isDevinCacheWindowUsable(window, { nowMs } = {}) {
+  if (!window || typeof window !== "object") return false;
+  const resetAtMs = parseTimeMs(window.reset_at);
+  if (resetAtMs === null) return true;
+  return resetAtMs > nowMs;
+}
+
+function normalizeDevinCachedLimits(
+  raw,
+  { nowMs = Date.now(), maxAgeMs = DEVIN_LIMITS_CACHE_MAX_AGE_MS } = {},
+) {
+  const cachedAtMs = parseTimeMs(raw?.cached_at);
+  if (!Number.isFinite(cachedAtMs)) return null;
+  if (cachedAtMs > nowMs + 60_000) return null;
+  if (nowMs - cachedAtMs > maxAgeMs) return null;
+
+  const cached = {
+    configured: true,
+    error: null,
+    plan_label: typeof raw?.plan_label === "string" ? raw.plan_label : null,
+    primary_window: isDevinCacheWindowUsable(raw?.primary_window, { nowMs }) ? raw.primary_window : null,
+    secondary_window: isDevinCacheWindowUsable(raw?.secondary_window, { nowMs }) ? raw.secondary_window : null,
+    stale: true,
+    cached_at: raw.cached_at,
+  };
+  return hasDevinWindow(cached) ? cached : null;
+}
+
+// Match the current credential-file revision, including on timeout fallback.
+// Legacy unpartitioned entries are deliberately ignored.
+function readDevinLimitsCache({ home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveDevinLimitsCachePath({ home }), "utf8"));
+    if (parsed?.devin?.identity !== identity) return null;
+    return normalizeDevinCachedLimits(parsed.devin, { nowMs });
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeDevinLimitsCache(limits, { home, nowMs = Date.now(), identity } = {}) {
+  if (!identity) return;
+  if (!limits?.configured || limits.error || !hasDevinWindow(limits)) return;
+  const cachePath = resolveDevinLimitsCachePath({ home });
+  const payload = {
+    devin: {
+      identity,
+      plan_label: limits.plan_label || null,
+      primary_window: limits.primary_window || null,
+      secondary_window: limits.secondary_window || null,
+      cached_at: new Date(nowMs).toISOString(),
+    },
+  };
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    const tmpPath = `${cachePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmpPath, cachePath);
+  } catch (_error) {}
+}
+
+function clearDevinLimitsCache({ home } = {}) {
+  try {
+    fs.rmSync(resolveDevinLimitsCachePath({ home }), { force: true });
+  } catch (_error) {}
+}
+
+// Only transient failures fall back to the disk cache. Requests without a
+// status (timeouts, transport failures, non-JSON or schema-malformed bodies)
+// are blips by construction; 429 and 5xx are the classic retryable classes.
+// Everything else — the ambiguous HTTP 400 the docs pin as a plain provider
+// error, and any other non-auth 4xx — is potentially persistent, and stale
+// bars must not mask it for up to the whole TTL.
+function isDevinTransientFetchError(reason) {
+  const status = reason?.statusCode;
+  if (typeof status !== "number") return true;
+  return status === 429 || status >= 500;
 }
 
 function resolveClaudeRateLimitPath({ home } = {}) {
@@ -3636,6 +4565,11 @@ async function fetchAntigravityQuotaSummaryJson(fetchImpl, accessToken, signal) 
   for (const url of ANTIGRAVITY_QUOTA_SUMMARY_URLS) {
     try {
       const res = await postAntigravityCloudCode(fetchImpl, url, accessToken, {}, signal);
+      if (res.status === 403 && await isAntigravitySubscriptionRequired(res)) {
+        const err = new Error("Antigravity quota summary requires a subscription.");
+        err.code = "SUBSCRIPTION_REQUIRED";
+        throw err;
+      }
       if (res.status === 401 || res.status === 403) {
         const err = new Error(ANTIGRAVITY_AUTH_EXPIRED_MESSAGE);
         err.code = "AUTH_EXPIRED";
@@ -3648,11 +4582,42 @@ async function fetchAntigravityQuotaSummaryJson(fetchImpl, accessToken, signal) 
       }
       return await res.json();
     } catch (error) {
-      if (error?.code === "AUTH_EXPIRED") throw error;
+      if (error?.code === "AUTH_EXPIRED" || error?.code === "SUBSCRIPTION_REQUIRED") throw error;
       lastError = error;
     }
   }
   throw lastError || new Error("Antigravity quota request failed.");
+}
+
+// Free-tier ("Starter Quota") accounts get 403 SUBSCRIPTION_REQUIRED from
+// retrieveUserQuotaSummary even with a valid token — that is not an auth failure.
+async function isAntigravitySubscriptionRequired(res) {
+  try {
+    const body = await res.json();
+    const details = Array.isArray(body?.error?.details) ? body.error.details : [];
+    return details.some((d) => d?.reason === "SUBSCRIPTION_REQUIRED");
+  } catch {
+    return false;
+  }
+}
+
+// Per-model quotaInfo, available to every tier. Reshaped into the language
+// server's clientModelConfigs so normalizeAntigravityResponse can pick windows.
+async function fetchAntigravityAvailableModelsLimits(fetchImpl, accessToken, signal) {
+  const res = await postAntigravityCloudCode(fetchImpl, ANTIGRAVITY_AVAILABLE_MODELS_URL, accessToken, {}, signal);
+  if (res.status === 401 || res.status === 403) {
+    const err = new Error(ANTIGRAVITY_AUTH_EXPIRED_MESSAGE);
+    err.code = "AUTH_EXPIRED";
+    err.status = res.status;
+    throw err;
+  }
+  if (!res.ok) throw new Error(`Antigravity API error: HTTP ${res.status}`);
+  const json = await res.json();
+  const models = json?.models && typeof json.models === "object" ? json.models : {};
+  const clientModelConfigs = Object.entries(models)
+    .filter(([, m]) => typeof m?.displayName === "string" && m.displayName)
+    .map(([id, m]) => ({ label: m.displayName, modelOrAlias: { model: id }, quotaInfo: m.quotaInfo }));
+  return normalizeAntigravityResponse({ clientModelConfigs }, { fallbackToConfigs: true });
 }
 
 /** Read the paid plan label without failing a successful quota response if this lookup fails. */
@@ -3694,8 +4659,14 @@ async function fetchAntigravityRemoteLimits({
   if (!resolvedCreds) return null;
 
   const loadWithToken = async (accessToken) => {
-    const payload = await fetchAntigravityQuotaSummaryJson(fetchImpl, accessToken, signal);
-    const windows = normalizeAntigravityQuotaSummary(payload);
+    let windows;
+    try {
+      const payload = await fetchAntigravityQuotaSummaryJson(fetchImpl, accessToken, signal);
+      windows = normalizeAntigravityQuotaSummary(payload);
+    } catch (error) {
+      if (error?.code !== "SUBSCRIPTION_REQUIRED") throw error;
+      windows = await fetchAntigravityAvailableModelsLimits(fetchImpl, accessToken, signal);
+    }
     const accountPlan = windows.account_plan || await fetchAntigravityPlanLabel(fetchImpl, accessToken, signal);
     return {
       configured: true,
@@ -4067,7 +5038,14 @@ function cacheExpiresAtMs(data, fetchedAtMs) {
 
 /** Return cached quota or share one in-flight fetch for the requested provider selection. */
 async function getUsageLimits(options = {}) {
-  const selection = usageLimitsSelectionKey(options);
+  // Resolve current routing before any aggregate cache or in-flight selection.
+  // Keep this snapshot for the fetch so a settings change during an await cannot
+  // publish one backend's response into another backend's cache partition.
+  const claudeBackend = normalizeHiddenProviders(options.hiddenProviders)?.includes("claude")
+    ? null
+    : readCustomBackend({ home: options.home || os.homedir(), env: options.env });
+  const customOrigin = claudeBackend?.backend === "custom" ? claudeBackend.backend_origin : null;
+  const selection = usageLimitsSelectionKey(options) + (customOrigin ? `-claude:${customOrigin}` : "");
   const cache = cacheBySelection[selection];
   const nowMs = Date.now();
   // Unseen selections (a hidden set never requested before this process's
@@ -4081,6 +5059,7 @@ async function getUsageLimits(options = {}) {
   const cacheGeneration = usageLimitsCacheGeneration;
   const promise = fetchUsageLimitsUncached({
     ...options,
+    claudeBackend,
     selectionKey: selection,
     cacheGeneration,
   }).finally(() => {
@@ -4113,6 +5092,7 @@ async function fetchUsageLimitsUncached({
   // "fetch every configured provider" (the legacy behavior clients that don't
   // send the parameter keep getting).
   hiddenProviders = null,
+  claudeBackend = null,
   // Generation captured by getUsageLimits before the fetch began. A provider
   // key save bumps it, and this fetch must then stop at returning its own
   // result: publishing it would restore pre-save data for every later caller.
@@ -4130,16 +5110,17 @@ async function fetchUsageLimitsUncached({
   const injectedNowMs = Number.isFinite(nowMs) ? nowMs : undefined;
   nowMs = injectedNowMs ?? Date.now();
   const hiddenSet = new Set(normalizeHiddenProviders(hiddenProviders) || []);
+  const customClaudeBackend = !hiddenSet.has("claude") && claudeBackend?.backend === "custom";
 
   // A hidden provider must not have its local credentials read at all (#956):
   // these upfront token/subscription probes are the first file and keychain
   // touches of the Claude/Codex chains, so they are gated here and every
   // downstream step keys off the resulting null token.
   const [claudeOauth, claudeSubscription, codexAuth] = await Promise.all([
-    hiddenSet.has("claude")
+    hiddenSet.has("claude") || customClaudeBackend
       ? Promise.resolve(null)
       : Promise.resolve().then(() => readClaudeCodeOauthToken({ platform, securityRunner, home, nowMs })),
-    hiddenSet.has("claude")
+    hiddenSet.has("claude") || customClaudeBackend
       ? Promise.resolve(null)
       : Promise.resolve().then(() => detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home })),
     hiddenSet.has("codex")
@@ -4209,7 +5190,7 @@ async function fetchUsageLimitsUncached({
   // (#956).
   const hiddenSentinel = Promise.resolve({ configured: false });
   const hiddenSettled = Promise.resolve({ status: "fulfilled", value: { configured: false } });
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGoRaw, qoder, qoderCn, codingPlan, agentPlan, commandCodeRaw, devinRaw, workbuddy, workbuddyAi, claudeServiceStatus] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGoRaw, qoder, qoderCn, codingPlan, agentPlan, commandCodeRaw, devinRaw, workbuddy, workbuddyAi, deepseek, claudeServiceStatus] = await Promise.all([
     claudeToken && !freshClaudeCache && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -4226,7 +5207,7 @@ async function fetchUsageLimitsUncached({
           (reason) => ({ status: "rejected", reason }),
         )
       : Promise.resolve(null),
-    hiddenSet.has("cursor") ? hiddenSentinel : withProviderTimeout(fetchCursorLimits({ home, fetchImpl: providerFetch }), "Cursor", providerTimeoutMs)
+    hiddenSet.has("cursor") ? hiddenSentinel : withProviderTimeout(fetchCursorLimits({ home, env, fetchImpl: providerFetch }), "Cursor", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     hiddenSet.has("kimi") ? hiddenSentinel : withProviderTimeout(fetchKimiLimits({ home, env, fetchImpl: providerFetch }), "Kimi", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
@@ -4326,9 +5307,10 @@ async function fetchUsageLimitsUncached({
       ),
     // Devin (devin.ai): daily/weekly subscription quota from the official
     // GetPlanStatus RPC, keyed by the session token the Devin CLI stores in
-    // ~/.local/share/devin/credentials.toml. No local fallback — window state
-    // lives server-side. fetchDevinLimits throws on auth expiry so the
-    // assemble step below can flag auth_action_required.
+    // ~/.local/share/devin/credentials.toml — window state lives server-side,
+    // so the assemble step below serves the last-good disk cache when this
+    // poll fails transiently. fetchDevinLimits throws on auth expiry so the
+    // assemble step can flag auth_action_required.
     hiddenSet.has("devin") ? hiddenSettled : withProviderTimeout(fetchDevinLimits({ home, env, enabled: devinEnabled === true, fetchImpl: providerFetch }), "Devin", providerTimeoutMs)
       .then(
         (value) => ({ status: "fulfilled", value }),
@@ -4343,6 +5325,25 @@ async function fetchUsageLimitsUncached({
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     hiddenSet.has("workbuddyAi") ? hiddenSentinel : withWorkbuddyProviderTimeout((signal) => fetchWorkbuddyAiLimits({ home, env, fetchImpl: providerFetch, signal, nowMs: injectedNowMs }), "WorkBuddy AI", providerTimeoutMs)
       .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
+    // DeepSeek (platform.deepseek.com, pay-as-you-go): the balance endpoint is
+    // the only documented programmatic source, so this slot yields a balance
+    // card, not quota windows (#960). The last-good disk-cache fallback with a
+    // pure TTL and a key fingerprint binding lives inside deepseek-limits.js;
+    // auth errors bypass it so a rejected key stays actionable. persistCache
+    // is sampled at slot creation — a mid-fetch key save can only leave a
+    // cache entry bound to the OLD key's fingerprint, which a fetch under the
+    // new key will never read.
+    hiddenSet.has("deepseek") ? hiddenSentinel : withProviderTimeout(
+      fetchDeepseekLimits({
+        home,
+        trackerDir,
+        env,
+        fetchImpl: providerFetch,
+        persistCache: cacheGeneration === usageLimitsCacheGeneration,
+      }),
+      "DeepSeek",
+      providerTimeoutMs,
+    ).catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" })),
     // Public status-page probe (fail-soft, own 5-min cache in provider-status.js).
     // Only probed for configured accounts — without a token the Claude section
     // never renders, so the reading would have nowhere to go.
@@ -4352,7 +5353,9 @@ async function fetchUsageLimitsUncached({
   ]);
 
   let claude;
-  if (!claudeToken) {
+  if (customClaudeBackend) {
+    claude = { configured: true, ...claudeBackend, limits_status: "not_applicable", cost_status: "unknown", error: null };
+  } else if (!claudeToken) {
     // Claude Code blanks `accessToken`/`refreshToken` in place when its login expires
     // (macOS Keychain item and .credentials.json alike) instead of removing the entry,
     // so "no token" is ambiguous: never signed in, or signed in and expired. An entry
@@ -4428,7 +5431,7 @@ async function fetchUsageLimitsUncached({
   // waiting out the poll interval. Re-read here (not the pre-fetch value) so a
   // cool-down just armed by this cycle's 429 is included; a successful read above
   // cleared the file, so this is null in the happy path.
-  if (claude.configured) {
+  if (claude.configured && claude.limits_status !== "not_applicable") {
     const claudeCooldownMs = readClaudeRateLimitRetryAtMs({
       home,
       nowMs,
@@ -4559,8 +5562,13 @@ async function fetchUsageLimitsUncached({
 
   // Devin: server-owned quota windows like CommandCode — a fulfilled
   // `configured: false` means no CLI credentials; a rejected fetch with
-  // AUTH_EXPIRED flags auth_action_required for the re-sign-in hint.
+  // AUTH_EXPIRED flags auth_action_required for the re-sign-in hint, and a
+  // CREDENTIALS_INVALID error is a broken local sign-in (unreadable file,
+  // missing token, unsupported api_server_url) — both actionable, never
+  // masked by the disk cache below.
   let devinObj;
+  const devinCredentialsInvalid =
+    devinRaw?.status === "rejected" && devinRaw.reason?.code === "CREDENTIALS_INVALID";
   if (devinRaw?.status === "fulfilled") {
     const value = devinRaw.value;
     devinObj = value && value.configured === false
@@ -4573,31 +5581,355 @@ async function fetchUsageLimitsUncached({
       : { configured: true, error: reason?.message || "Unknown error" };
   }
 
-  const cursorLimits = cursorSandDuplicatesGrokPool(cursor, grok)
-    ? { ...cursor, quaternary_window: null }
-    : cursor;
+  // Devin: persist last successful windows so a transient timeout/5xx on the
+  // server.codeium.com route serves stale bars instead of a flashing "fetch
+  // failed" (mirrors OpenCode Go / Cursor). Auth and broken-credential errors
+  // punch through above, ambiguous/persistent HTTP rejections punch through
+  // below, an opted-out / unconfigured provider has no window state to fall
+  // back on, and a successful windowless read (legacy billing strategy)
+  // invalidates any prior entry instead of leaving it for a later blip to
+  // resurrect the former plan's bars.
+  if (
+    devinObj
+    && devinObj.configured !== false
+    && devinObj.auth_action_required !== "reauth"
+    && !devinCredentialsInvalid
+  ) {
+    const currentIdentity = resolveDevinCacheIdentity({ home, env });
+    if (!devinObj.error) {
+      // A response belongs to the credentials read before its request. Never
+      // write or clear a new login's cache after an in-flight replacement.
+      if (cacheGeneration === usageLimitsCacheGeneration
+        && currentIdentity && devinObj.cache_identity === currentIdentity) {
+        if (hasDevinWindow(devinObj)) {
+          writeDevinLimitsCache(devinObj, { home, nowMs, identity: currentIdentity });
+        } else {
+          clearDevinLimitsCache({ home });
+        }
+      }
+    } else if (isDevinTransientFetchError(devinRaw?.reason)) {
+      // The fallback lands after the whole provider round: sample the clock
+      // here (tests keep their injected clock) so a window that rolled over
+      // while the poll was waiting is dropped instead of served.
+      const cached = readDevinLimitsCache({
+        home,
+        nowMs: injectedNowMs ?? Date.now(),
+        identity: currentIdentity,
+      });
+      if (cached) devinObj = cached;
+    }
+  }
+
+  if (devinObj && "cache_identity" in devinObj) {
+    const { cache_identity: _identity, ...devinPayload } = devinObj;
+    devinObj = devinPayload;
+  }
+
+  // Cursor: persist last successful windows so a transient timeout/5xx on the
+  // cursor.com / api2.cursor.sh routes serves stale bars instead of a flashing
+  // "fetch failed" (mirrors Codex / Claude / OpenCode Go). A session-expiry error
+  // (401/403 — "re-login in Cursor") is actionable and must not be hidden behind
+  // stale cache, so it passes through untouched.
+  let cursorWithCache;
+  if (!cursor || cursor.configured === false) {
+    cursorWithCache = cursor;
+  } else if (cursor.auth_error === true) {
+    cursorWithCache = cursor;
+  } else if (!cursor.error && hasCursorWindow(cursor)) {
+    cursorWithCache = {
+      ...cursor,
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    if (cacheGeneration === usageLimitsCacheGeneration) {
+      writeCursorLimitsCache(cursorWithCache, {
+        home,
+        nowMs,
+        identity: typeof cursor.cache_identity === "string"
+          ? cursor.cache_identity
+          : resolveCursorCacheIdentity({ home, env }),
+      });
+    }
+  } else {
+    // The slot's error object loses the fetcher's identity field when the outer
+    // timeout race wins (the common failure mode this cache exists for), so
+    // re-derive it from the local state DB on this failure-only path.
+    const identity = typeof cursor.cache_identity === "string"
+      ? cursor.cache_identity
+      : resolveCursorCacheIdentity({ home, env });
+    const cached = readCursorLimitsCache({ home, nowMs, identity });
+    cursorWithCache = cached || cursor;
+  }
+  // cache_identity / auth_error are internal cache-plumbing markers, not payload.
+  if (cursorWithCache && ("cache_identity" in cursorWithCache || "auth_error" in cursorWithCache)) {
+    const { cache_identity: _identity, auth_error: _authError, ...cursorPayload } = cursorWithCache;
+    cursorWithCache = cursorPayload;
+  }
+
+  // Grok: persist last successful windows so a transient timeout/5xx on the
+  // cli-chat-proxy.grok.com route serves stale bars instead of a flashing
+  // "fetch failed" (mirrors Codex / Claude / Cursor). A re-login error
+  // (GROK_AUTH_REQUIRED / GROK_REAUTH_REQUIRED — "run `grok login`") is
+  // actionable and must not be hidden behind stale cache, so it passes
+  // through untouched.
+  let grokWithCache;
+  if (!grok || grok.configured === false) {
+    grokWithCache = grok;
+  } else if (grok.auth_error === true) {
+    grokWithCache = grok;
+  } else if (!grok.error && hasGrokWindow(grok)) {
+    grokWithCache = {
+      ...grok,
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    // Write only under the identity the fetch itself carried: re-reading
+    // auth.json here could attribute a finished fetch's windows to an account
+    // that logged in while the request was in flight (opaque → JWT switch).
+    // No fetch-side identity (opaque token) → refuse the write (fail-closed).
+    if (cacheGeneration === usageLimitsCacheGeneration && typeof grok.cache_identity === "string") {
+      writeGrokLimitsCache(grokWithCache, {
+        home,
+        nowMs,
+        identity: grok.cache_identity,
+      });
+    }
+  } else {
+    // The slot's error object loses the fetcher's identity field when the outer
+    // timeout race wins (the common failure mode this cache exists for), so
+    // re-derive it from auth.json on this failure-only path.
+    const identity = typeof grok.cache_identity === "string"
+      ? grok.cache_identity
+      : resolveGrokCacheIdentity({ home, env });
+    const cached = readGrokLimitsCache({ home, nowMs, identity });
+    grokWithCache = cached || grok;
+  }
+  // cache_identity / auth_error are internal cache-plumbing markers, not payload.
+  if (grokWithCache && ("cache_identity" in grokWithCache || "auth_error" in grokWithCache)) {
+    const { cache_identity: _identity, auth_error: _authError, ...grokPayload } = grokWithCache;
+    grokWithCache = grokPayload;
+  }
+
+  const cursorLimits = cursorSandDuplicatesGrokPool(cursorWithCache, grokWithCache)
+    ? { ...cursorWithCache, quaternary_window: null }
+    : cursorWithCache;
+
+  // Copilot: same fallback contract as Cursor for the api.github.com route — a
+  // transient timeout/5xx serves stale bars instead of a flashing "fetch failed",
+  // while a token-rejection error (401/403 — "re-authenticate") is actionable and
+  // passes through untouched. The otel probe fields ride along on every slot
+  // result, so a cached overlay spreads the live object first and lets the cached
+  // entry win only the limit fields.
+  let copilotWithCache;
+  if (!copilot || copilot.configured === false) {
+    copilotWithCache = copilot;
+  } else if (copilot.auth_error === true) {
+    copilotWithCache = copilot;
+  } else if (!copilot.error && hasCopilotWindow(copilot)) {
+    copilotWithCache = {
+      ...copilot,
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    // Only the login captured with the request can own its windows. An
+    // unknown login must never be promoted to a newly signed-in account.
+    const identity = copilot.cache_identity;
+    if (typeof identity === "string" && identity
+      && identity === await resolveCopilotCacheIdentity({ home, platform, securityRunner })
+      && cacheGeneration === usageLimitsCacheGeneration) {
+      writeCopilotLimitsCache(copilotWithCache, { home, nowMs, identity });
+    }
+  } else {
+    // Re-read the current login even when the failed request carries an identity:
+    // the account may have changed while the request was in flight.
+    const identity = await resolveCopilotCacheIdentity({ home, platform, securityRunner });
+    // Sample after the async auth lookup too: a slow poll can straddle a reset.
+    const cached = readCopilotLimitsCache({ home, nowMs: Date.now(), identity });
+    copilotWithCache = cached ? { ...copilot, ...cached } : copilot;
+  }
+  // cache_identity / auth_error are internal cache-plumbing markers, not payload.
+  if (copilotWithCache && ("cache_identity" in copilotWithCache || "auth_error" in copilotWithCache)) {
+    const { cache_identity: _identity, auth_error: _authError, ...copilotPayload } = copilotWithCache;
+    copilotWithCache = copilotPayload;
+  }
+
+  // Kimi: persist last successful windows so a transient timeout/5xx on the
+  // api.kimi.com / api.kimi.ai coding routes serves stale bars instead of a
+  // flashing "fetch failed" (mirrors Cursor / Codex / OpenCode Go). Re-login
+  // errors ("Not logged in to Kimi" / "token_expired") and actionable profile
+  // misconfigurations must not be hidden behind stale cache, so they pass
+  // through untouched.
+  let kimiWithCache;
+  if (!kimi || kimi.configured === false) {
+    kimiWithCache = kimi;
+  } else if (kimi.auth_error === true || kimi.config_error === true) {
+    kimiWithCache = kimi;
+  } else if (!kimi.error && hasKimiWindow(kimi)) {
+    kimiWithCache = {
+      ...kimi,
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    if (cacheGeneration === usageLimitsCacheGeneration) {
+      writeKimiLimitsCache(kimiWithCache, {
+        home,
+        nowMs,
+        identity: typeof kimi.cache_identity === "string"
+          ? kimi.cache_identity
+          : resolveKimiCacheIdentity({ home, env }),
+      });
+    }
+  } else {
+    // The slot's error object loses the fetcher's identity field when the outer
+    // timeout race wins (the common failure mode this cache exists for), so
+    // re-derive it from the local Kimi profile on this failure-only path.
+    const identity = typeof kimi.cache_identity === "string"
+      ? kimi.cache_identity
+      : resolveKimiCacheIdentity({ home, env });
+    const cached = readKimiLimitsCache({ home, nowMs, identity });
+    kimiWithCache = cached || kimi;
+  }
+  // cache_identity / auth_error / config_error are internal cache-plumbing
+  // markers, not payload.
+  if (kimiWithCache && ("cache_identity" in kimiWithCache || "auth_error" in kimiWithCache || "config_error" in kimiWithCache)) {
+    const {
+      cache_identity: _kimiIdentity,
+      auth_error: _kimiAuthError,
+      config_error: _kimiConfigError,
+      ...kimiPayload
+    } = kimiWithCache;
+    kimiWithCache = kimiPayload;
+  }
+
+  // Gemini: persist last successful windows so a transient timeout/5xx on the
+  // cloudcode-pa.googleapis.com routes serves stale bars instead of a flashing
+  // "fetch failed" (mirrors Cursor / Codex / OpenCode Go). Auth errors (a dead
+  // OAuth session, or the unsupported api-key / vertex-ai auth modes) are
+  // actionable and must not be hidden behind stale cache, so they pass through
+  // untouched.
+  let geminiWithCache;
+  if (!gemini || gemini.configured === false) {
+    geminiWithCache = gemini;
+  } else if (gemini.auth_error === true) {
+    geminiWithCache = gemini;
+  } else if (!gemini.error && hasGeminiWindow(gemini)) {
+    geminiWithCache = {
+      ...gemini,
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    if (cacheGeneration === usageLimitsCacheGeneration) {
+      // A slow in-flight fetch must not clobber the on-disk entry of an
+      // account that has since been switched away: only write when the
+      // snapshot's identity still matches the current credentials.
+      const currentIdentity = resolveGeminiCacheIdentity({ home, env });
+      const snapshotIdentity = typeof gemini.cache_identity === "string"
+        ? gemini.cache_identity
+        : currentIdentity;
+      if (snapshotIdentity && snapshotIdentity === currentIdentity) {
+        writeGeminiLimitsCache(geminiWithCache, {
+          home,
+          nowMs,
+          identity: snapshotIdentity,
+        });
+      }
+    }
+  } else {
+    // The slot's error object loses the fetcher's identity field when the outer
+    // timeout race wins (the common failure mode this cache exists for). Always
+    // re-derive from the CURRENT local credentials — the request may have
+    // started under an account that has since been switched away, in which
+    // case the read's identity gate refuses the old entry. Revalidate the auth
+    // mode too: a mid-flight switch to api-key/vertex-ai never reached the
+    // punch-through branch above, but stale OAuth bars would still mislead.
+    const selectedType = loadGeminiSettings({ home, env })?.security?.auth?.selectedType ?? null;
+    if (selectedType === "api-key" || selectedType === "vertex-ai") {
+      geminiWithCache = gemini;
+    } else {
+      const identity = resolveGeminiCacheIdentity({ home, env });
+      const cached = readGeminiLimitsCache({ home, nowMs, identity });
+      geminiWithCache = cached || gemini;
+    }
+  }
+  // cache_identity / auth_error are internal cache-plumbing markers, not payload.
+  if (geminiWithCache && ("cache_identity" in geminiWithCache || "auth_error" in geminiWithCache)) {
+    const { cache_identity: _identity, auth_error: _authError, ...geminiPayload } = geminiWithCache;
+    geminiWithCache = geminiPayload;
+  }
+
+  // Kiro: the slot runs the local kiro-cli (its own 2s/20s command budgets,
+  // never rejects), so the failure modes are CLI timeouts, unparseable panels
+  // and backend hiccups — persist the last successful windows and serve them
+  // stale on any of those (mirrors Codex / OpenCode Go / Cursor). A
+  // not-logged-in panel is actionable and must not be hidden behind stale
+  // cache, so it passes through untouched. The credits-only success (kiro-cli
+  // absent, sidecar present) is not a fetch failure and keeps its shape.
+  // Identity comes from the fetcher's pre-CLI capture (cache_identity), and a
+  // write only lands while a fresh read of the auth file still agrees — an
+  // account switch mid-flight refuses the write instead of stamping the
+  // previous account's panel under the new login.
+  const kiroAuthBlocked = isKiroAuthError(kiro?.error);
+  let kiroWithCache;
+  if (!kiro || kiro.configured === false || kiroAuthBlocked) {
+    kiroWithCache = kiro;
+  } else if (!kiro.error && hasKiroWindow(kiro)) {
+    kiroWithCache = {
+      ...kiro,
+      stale: false,
+      cached_at: new Date(nowMs).toISOString(),
+    };
+    if (cacheGeneration === usageLimitsCacheGeneration) {
+      const identity = typeof kiro.cache_identity === "string"
+        ? kiro.cache_identity
+        : resolveKiroAuthIdentity({ home });
+      if (identity && identity === resolveKiroAuthIdentity({ home })) {
+        writeKiroLimitsCache(kiroWithCache, { home, nowMs, identity });
+      }
+    }
+  } else if (!kiro.error) {
+    kiroWithCache = kiro;
+  } else {
+    const cached = readKiroLimitsCache({
+      home,
+      // Gate against the wall clock, not the aggregate's entry stamp: a slow
+      // failed CLI read can straddle a reset, and an expired window must not
+      // pass the reset gate on a timestamp from before the read started.
+      nowMs: Date.now(),
+      // The current login, never the fetch-time capture — a switch that
+      // happened mid-flight must not match the previous account's entry.
+      identity: resolveKiroAuthIdentity({ home }),
+    });
+    // The failed slot already carries the credits-sidecar fields the fetcher
+    // merged in; the cached windows overlay on top of them.
+    kiroWithCache = cached ? { ...kiro, ...cached } : kiro;
+  }
+  // cache_identity is internal cache plumbing, not payload.
+  if (kiroWithCache && "cache_identity" in kiroWithCache) {
+    const { cache_identity: _identity, ...kiroPayload } = kiroWithCache;
+    kiroWithCache = kiroPayload;
+  }
 
   const data = {
     fetched_at: new Date(nowMs).toISOString(),
-    claude: withPlanLabel(claude, claudePlanType, "Claude"),
+    claude: claude.limits_status === "not_applicable" ? claude : withPlanLabel(claude, claudePlanType, "Claude"),
     codex: withPlanLabel(codex, codex.plan_type, "Codex"),
     cursor: withPlanLabel(cursorLimits, cursorLimits.membership_type, "Cursor"),
     // Kimi's subType (TYPE_PURCHASE/TYPE_EVENT) is the credit *source*, not a plan
     // tier, and membership.level is an opaque enum (LEVEL_INTERMEDIATE) with no
     // authoritative human-readable plan mapping. Both rendered as garbage like
     // "Kimi Type_event" (issue #130), so show the bare brand instead.
-    kimi: withPlanLabel(kimi, null, "Kimi"),
-    gemini: withPlanLabel(gemini, gemini.account_plan, "Gemini"),
-    kiro: withPlanLabel(kiro, kiro.plan_name, "Kiro"),
+    kimi: withPlanLabel(kimiWithCache, null, "Kimi"),
+    gemini: withPlanLabel(geminiWithCache, geminiWithCache.account_plan, "Gemini"),
+    kiro: withPlanLabel(kiroWithCache, kiroWithCache.plan_name, "Kiro"),
     antigravity: withPlanLabel(antigravity, antigravity.account_plan, "Antigravity"),
-    copilot: withPlanLabel(copilot, copilot.plan_name, "Copilot"),
+    copilot: withPlanLabel(copilotWithCache, copilotWithCache.plan_name, "Copilot"),
     // grok-limits already maps subscriptionTier to xAI's own product names
     // ("SuperGrok Heavy", "X Premium+", "API Key"). The shared normalization
     // would Title-Case them into "Supergrok Heavy" / "Api Key" and drop "Free"
     // outright, so surface the label as-is like CommandCode below. Error and
     // unconfigured branches never carry plan_label, so the panel still falls
     // back to the bare brand name.
-    grok,
+    grok: grokWithCache,
     zcode: withPlanLabel(zcode, zcode.plan_label, "ZCode"),
     opencodeGo: withPlanLabel(opencodeGo, opencodeGo?.plan_label, "OpenCode Go"),
     // CommandCode tiers are acronym brands (GOAT/Pro/Max) — the fetcher already
@@ -4616,6 +5948,10 @@ async function fetchUsageLimitsUncached({
     // as separate providers — one row per signed-in edition, never merged.
     workbuddy,
     workbuddyAi,
+    // DeepSeek carries a balance card (no windows, no plan label): the fetcher
+    // stamps cached_at/stale on both its live and last-good paths, so pass it
+    // through verbatim like grok.
+    deepseek,
   };
 
   for (const [providerName, provider] of Object.entries(data)) {
@@ -4624,6 +5960,9 @@ async function fetchUsageLimitsUncached({
     // Devin) is metadata-free by contract — it was never fetched, so it must
     // not be aged into a "disk-cache"/stale provenance.
     if (provider.configured === false && Object.keys(provider).length === 1) continue;
+    // A custom-backend state is local routing information, not an official
+    // provider API reading with a capture time or quota freshness.
+    if (provider.limits_status === "not_applicable") continue;
     const capturedAt = provider.cached_at || data.fetched_at;
     const ageMs = Math.max(0, nowMs - Date.parse(capturedAt || ""));
     const stale = provider.stale === true || (Number.isFinite(ageMs) && ageMs > 10 * 60 * 1000);
@@ -4728,6 +6067,8 @@ module.exports = {
   detectAntigravityProcess,
   fetchAntigravityLimits,
   fetchCopilotLimits,
+  readCopilotAuth,
+  readCopilotAuthAsync,
   readCopilotOauthToken,
   readCopilotOauthTokenAsync,
   readCopilotAuthDbToken,

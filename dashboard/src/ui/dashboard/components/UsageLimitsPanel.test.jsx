@@ -53,6 +53,16 @@ afterEach(() => {
 });
 
 describe("UsageLimitsPanel", () => {
+  it.each([
+    [EN_LOCALE, "Custom backend — Anthropic limits not applicable"],
+    [ZH_CN_LOCALE, "自定义后端 — Anthropic 限额不适用"],
+  ])("shows custom Claude limits explicitly in %s", async (locale, message) => {
+    setCopyLocale(locale);
+    render(<UsageLimitsPanel order={["claude"]} claude={{ configured: true, backend: "custom", limits_status: "not_applicable" }} />);
+    await waitFor(() => expect(screen.getByText(message)).toBeVisible());
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+  });
+
   afterEach(() => {
     setCopyLocale(EN_LOCALE);
   });
@@ -571,6 +581,95 @@ describe("UsageLimitsPanel", () => {
     render(<UsageLimitsPanel commandCode={{ configured: false }} order={["commandCode"]} />);
     expect(screen.getByText("cmd login")).toBeInTheDocument();
     expect(screen.queryByText(/launchctl/)).not.toBeInTheDocument();
+  });
+
+  it("renders the DeepSeek balance card with one row per currency and no bars", () => {
+    render(
+      <UsageLimitsPanel
+        deepseek={{
+          configured: true,
+          error: null,
+          is_available: true,
+          balances: [
+            { currency: "CNY", total: 110.02, granted: 0, topped_up: 110.02 },
+            { currency: "USD", total: 15.5, granted: 2, topped_up: 13.5 },
+          ],
+        }}
+        order={["deepseek"]}
+      />,
+    );
+
+    expect(screen.getByText("DeepSeek")).toBeInTheDocument();
+    expect(screen.getByText("Balance (CNY)")).toBeInTheDocument();
+    expect(screen.getByText("Balance (USD)")).toBeInTheDocument();
+    expect(screen.getByText("110.02")).toBeInTheDocument();
+    expect(screen.getByText("15.5")).toBeInTheDocument();
+    expect(screen.getByText("incl. grant 2")).toBeInTheDocument();
+    // A pay-as-you-go balance invents no window bar (issue 960): no progress bar
+    // may appear inside the balance card.
+    expect(document.querySelector("[data-deepseek-balance] .rounded-full")).toBeNull();
+  });
+
+  it("shows the DeepSeek unavailable notice while keeping balances visible", () => {
+    render(
+      <UsageLimitsPanel
+        deepseek={{
+          configured: true,
+          error: null,
+          is_available: false,
+          balances: [{ currency: "CNY", total: 0, granted: 0, topped_up: 0 }],
+        }}
+        order={["deepseek"]}
+      />,
+    );
+
+    expect(screen.getByText("Balance (CNY)")).toBeInTheDocument();
+    expect(screen.getByText(/unavailable/)).toBeInTheDocument();
+  });
+
+  it("shows the DeepSeek setup hint with the platform link when not connected", () => {
+    render(<UsageLimitsPanel deepseek={{ configured: false }} order={["deepseek"]} />);
+
+    expect(screen.getByText("Not connected")).toBeInTheDocument();
+    expect(screen.getByText("Connect DeepSeek")).toBeInTheDocument();
+    expect(screen.getByText("Open platform.deepseek.com")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Paste API key")).toBeInTheDocument();
+  });
+
+  it("keeps the DeepSeek setup hint on an error row so a rejected key can be replaced", () => {
+    render(
+      <UsageLimitsPanel
+        deepseek={{ configured: true, error: "DeepSeek API key was rejected (401). Check the key in the DeepSeek platform console.", auth_error: true }}
+        order={["deepseek"]}
+      />,
+    );
+
+    expect(screen.getByText(/rejected \(401\)/)).toBeInTheDocument();
+    expect(screen.getByText("Connect DeepSeek")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Paste API key")).toBeInTheDocument();
+  });
+
+  it("explains an environment-provided DeepSeek key on an error row so the saved key can take over", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" });
+    render(
+      <UsageLimitsPanel
+        deepseek={{
+          configured: true,
+          error: "DeepSeek API key was rejected (401). Check the key in the DeepSeek platform console.",
+          auth_error: true,
+          credential_source: "env",
+        }}
+        order={["deepseek"]}
+      />,
+    );
+
+    expect(screen.getByText(/rejected \(401\)/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Using DEEPSEEK_API_KEY from the environment\./),
+    ).toBeInTheDocument();
+    expect(screen.getByText("launchctl unsetenv DEEPSEEK_API_KEY")).toBeInTheDocument();
+    // One input from the setup hint, one from the env notice.
+    expect(screen.getAllByPlaceholderText("Paste API key")).toHaveLength(2);
   });
 
   it("explains an environment-provided OpenCode Go key and lets the user save one from the notice", async () => {
@@ -1405,6 +1504,14 @@ describe("UsageLimitsPanel", () => {
     // Collapsed: top-right auto-renew icon badge and the "Subscription" bar label.
     expect(screen.getByRole("img", { name: "Auto-renew" })).toBeInTheDocument();
     expect(screen.getByText("Subscription")).toBeInTheDocument();
+    // SubscriptionBar must opt into widest-label measurement like LimitBar,
+    // otherwise CJK "订阅" is clipped by --tt-limits-label-w from short 5h/7d labels (#1019).
+    const subscriptionLabel = screen.getByText("Subscription");
+    expect(subscriptionLabel.hasAttribute("data-limit-label")).toBe(true);
+    const labelGroup = subscriptionLabel.closest("[data-limit-label-group]");
+    expect(labelGroup).not.toBeNull();
+    const measured = [...labelGroup.querySelectorAll("[data-limit-label]")].map((el) => el.textContent);
+    expect(measured).toContain("Subscription");
 
     // Expanding reveals the subscription detail line.
     fireEvent.click(screen.getByText("Cursor").closest("[role='button']"));

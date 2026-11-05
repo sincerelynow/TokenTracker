@@ -240,7 +240,14 @@ test("pricing cache refresh reprices old sidecars without changing request perfo
   t.after(() => { delete state.litellmPerMillionMap[model]; state.negativeCache.clear(); state.revision += 1; });
   const assistant = claudeAssistant("m1", "u1", 10);
   assistant.message.model = model;
-  const { home } = fixture(t, [claudeUser("u1", 0), assistant]);
+  const { file, home } = fixture(t, []);
+  const { captureClaudeBackend } = require("../src/lib/claude-backend");
+  const observe = (event) => captureClaudeBackend(path.join(home, ".tokentracker/tracker"), {
+    hook_event_name: event, session_id: "session", transcript_path: file,
+  }, { ANTHROPIC_BASE_URL: "https://api.anthropic.com" });
+  observe("SessionStart");
+  fs.appendFileSync(file, [claudeUser("u1", 0), assistant].map(JSON.stringify).join("\n") + "\n");
+  observe("Stop");
   const before = (await buildSessionAnalytics({ home, force: true }))[0];
   assert.equal(before.cost_is_partial, true);
   state.litellmPerMillionMap[model] = { input: 1, output: 2, cache_read: 0, cache_write: 0 };
@@ -288,7 +295,7 @@ test("nonzero unknown Claude usage remains in model totals and partial cost", as
 });
 
 
-for (const version of [14, 15, 16, 17, 24, 25, 26, 27]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
+for (const version of [14, 15, 16, 17, 24, 25, 26, 27, 28]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
   const rows = [context(0), output(5, "function_call"), count(10, usage(300))];
   const { home } = fixture(t, rows, "codex");
   const tracker = path.join(home, ".tokentracker/tracker");
@@ -310,7 +317,7 @@ for (const version of [14, 15, 16, 17, 24, 25, 26, 27]) test(`version ${version}
   meta.version = version;
   fs.writeFileSync(metaPath, JSON.stringify(meta));
   const rebuilt = (await buildSessionAnalytics({ home }))[0];
-  assert.equal(rebuilt.version, 28);
+  assert.equal(rebuilt.version, 29);
   assert.equal(rebuilt.session_store_bytes, cold.session_store_bytes);
   assert.ok(rebuilt.session_store_bytes > 0);
   assert.equal(rebuilt.source, "codex");
@@ -319,7 +326,7 @@ for (const version of [14, 15, 16, 17, 24, 25, 26, 27]) test(`version ${version}
   assert.deepEqual(rebuilt.performance, cold.performance);
   assert.ok(rebuilt.performance.estimated_tokens_per_second > 0);
   assert.deepEqual(rebuilt.model_usage[0].performance, cold.model_usage[0].performance);
-  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 28);
+  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 29);
 });
 
 test("ZCode collector converts per-request durations and first-token samples", () => {

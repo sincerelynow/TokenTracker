@@ -773,8 +773,17 @@ usage.overview.expand,ui,DashboardPage,UsageOverview,expand,"expand",,active
 usage.overview.collapse,ui,DashboardPage,UsageOverview,collapse,"collapse",,active
 usage.overview.model_count,ui,DashboardPage,UsageOverview,model_count,"{{count}} models",,active
 usage.overview.request_count,ui,DashboardPage,UsageOverview,request_count,"{{count}} requests",,active
+usage.overview.tier_standard,ui,DashboardPage,UsageOverview,tier_standard,"Standard",,active
+usage.overview.tier_fast,ui,DashboardPage,UsageOverview,tier_fast,"Fast",,active
+usage.overview.tier_ultrafast,ui,DashboardPage,UsageOverview,tier_ultrafast,"Ultrafast",,active
+usage.overview.tier_rate_label,ui,DashboardPage,UsageOverview,tier_rate_label,"{{label}} ({{rate}}×)",,active
 usage.overview.request_only_item,ui,DashboardPage,UsageOverview,request_only_item,"{{label}} · {{count}} requests",,active
 usage.overview.request_only_note,ui,DashboardPage,UsageOverview,request_only_note,"Active without token data: {{items}}. Per-model detail in All models.",,active
+usage.overview.scope_account,ui,DashboardPage,UsageOverview,scope_account,"Account-wide",,active
+usage.overview.scope_account_tip,ui,DashboardPage,UsageOverview,scope_account_tip,"Totals from every device synced to your account, not just this machine.",,active
+usage.overview.scope_local,ui,DashboardPage,UsageOverview,scope_local,"This device",,active
+usage.overview.scope_local_tip,ui,DashboardPage,UsageOverview,scope_local_tip,"Showing this machine only. Cloud sync keeps running in the background — switching does not pause uploads.",,active
+usage.overview.scope_switch_aria,ui,DashboardPage,UsageOverview,scope_switch_aria,"Data scope",,active
 usage.overview.request_only_separator,ui,DashboardPage,UsageOverview,request_only_separator,", ",,active
 usage.overview.model_details_aria,ui,DashboardPage,UsageOverview,model_details_aria,"{{provider}} model details",,active
 usage.overview.all_tools,ui,DashboardPage,UsageOverview,all_tools,"All",,active
@@ -787,8 +796,6 @@ usage.overview.antigravity_notice_title,ui,DashboardPage,UsageOverview,antigravi
 usage.overview.antigravity_notice_body,ui,DashboardPage,UsageOverview,antigravity_notice_body,"Exact token usage and prompt-cache hits are parsed from Antigravity session metadata when available. Fallback transcripts without metadata are estimated from text length (~4 chars/token).",,active
 usage.overview.devin_notice_title,ui,DashboardPage,UsageOverview,devin_notice_title,"Cost not estimated",,active
 usage.overview.devin_notice_body,ui,DashboardPage,UsageOverview,devin_notice_body,"Devin reports real local token counts, but swe-2, swe-2-high and compactor have no pricing data in this build, so they are excluded from dollar estimates. A $0 figure does not mean the usage was free.",,active
-usage.overview.trae_notice_title,ui,DashboardPage,UsageOverview,trae_notice_title,"TRAE cost is partial",,active
-usage.overview.trae_notice_body,ui,DashboardPage,UsageOverview,trae_notice_body,"In multi-step turns, TRAE splits cached input for the final step, not the earlier ones. Input without a cache split counts toward token totals but not toward cost. Costs use model prices, not billed amounts.",,active
 usage.overview.week_cross_month_hint,ui,DashboardPage,UsageOverview,week_cross_month_hint,"This week spans two calendar months, so its total is not directly comparable with a single month's usage",,active
 limits.panel.title,ui,LimitsPage,UsageLimitsPanel,title,"Usage Limits",,active
 limits.panel.mode_separator,ui,LimitsPage,UsageLimitsPanel,title_separator," · ",,active
@@ -1706,6 +1713,15 @@ limits.provider.workbuddy,ui,LimitsPage,UsageLimitsPanel,provider_workbuddy,"Wor
 limits.provider.workbuddy_ai,ui,LimitsPage,UsageLimitsPanel,provider_workbuddy_ai,"WorkBuddy AI",,active
 limits.label.workbuddy_plan,ui,LimitsPage,UsageLimitsPanel,workbuddy_plan,"Plan",,active
 limits.label.workbuddy_addon,ui,LimitsPage,UsageLimitsPanel,workbuddy_addon,Add-on Credits,,active
+limits.deepseek.balance_label,ui,LimitsPage,UsageLimitsPanel,deepseek_balance_label,"Balance ({{currency}})",,active
+limits.deepseek.granted_detail,ui,LimitsPage,UsageLimitsPanel,deepseek_granted_detail,"incl. grant {{amount}}",,active
+limits.deepseek.unavailable,ui,LimitsPage,UsageLimitsPanel,deepseek_unavailable,"DeepSeek reports this account as unavailable — the balance may be exhausted or the account under review.",,active
+limits.deepseek.setupHint.title,ui,LimitsPage,UsageLimitsPanel,deepseek_hint_title,"Connect DeepSeek",,active
+limits.deepseek.setupHint.subtitle,ui,LimitsPage,UsageLimitsPanel,deepseek_hint_subtitle,"DeepSeek is pay-as-you-go: TokenTracker shows the prepaid balance from the official API — there are no usage windows.",,active
+limits.deepseek.setupHint.step1,ui,LimitsPage,UsageLimitsPanel,deepseek_hint_step1,"Create an API key in the DeepSeek platform console.",,active
+limits.deepseek.setupHint.cta,ui,LimitsPage,UsageLimitsPanel,deepseek_hint_cta,"Open platform.deepseek.com",,active
+limits.deepseek.setupHint.step2,ui,LimitsPage,UsageLimitsPanel,deepseek_hint_step2,"Paste the API key (it starts with sk-). TokenTracker uses it only for balance requests.",,active
+limits.provider.deepseek,ui,LimitsPage,UsageLimitsPanel,provider_deepseek,"DeepSeek",,active
 limits.label.devin_daily,ui,LimitsPage,UsageLimitsPanel,devin_daily,"Daily",,active
 limits.label.devin_weekly,ui,LimitsPage,UsageLimitsPanel,devin_weekly,"Weekly",,active
 limits.devin.setupHint.title,ui,LimitsPage,UsageLimitsPanel,devin_hint_title,"Connect Devin",,active
@@ -2203,3 +2219,4 @@ settings.local_data.local_history_only,dashboard,DashboardPage,LocalDataSection,
 leaderboard.profile_modal.window.lifetime,dashboard,LeaderboardProfileModal,StatCards,lifetime,"Totals: all time. Active days, daily average and breakdowns: {{from}} to {{to}}.",,active
 leaderboard.profile_modal.window.period,dashboard,LeaderboardProfileModal,StatCards,period,Stats: {{from}} to {{to}}.,,active
 leaderboard.profile_modal.window.average,dashboard,LeaderboardProfileModal,StatCards,average,"Window cost divided by {{days}} calendar days, including days without usage.",,active
+limits.claude.custom_backend,ui,LimitsPage,UsageLimitsPanel,status,Custom backend — Anthropic limits not applicable,,active

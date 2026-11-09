@@ -82,28 +82,11 @@ async function cmdServe(argv) {
   // Native hosts (Windows especially) probe health with a hard deadline; if we
   // block on init+first-sync before listen, that deadline kills the child and
   // the setup never commits cursors.json (#961).
-  const { trackerDir, binDir } = await resolveTrackerPaths();
+  const { trackerDir } = await resolveTrackerPaths();
 
-  try {
-    const { installLocalTrackerApp } = require("./init");
-    await installLocalTrackerApp({ appDir: path.join(trackerDir, "app") });
-  } catch (e) {
-    process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
-  }
-
-  // Optional sync for non-first-run launches. First-run init still owns its
-  // inline first sync below, after the listener is up.
+  // All runtime maintenance and initial sync run after listen. The dashboard
+  // is served from this package, not the hook runtime installed in trackerDir.
   const needsFirstRunSetup = !fssync.existsSync(path.join(trackerDir, "cursors.json"));
-  if (opts.sync && !needsFirstRunSetup) {
-    process.stdout.write("Syncing local data...\n");
-    try {
-      const { cmdSync } = require("./sync");
-      await cmdSync(["--auto"]);
-      process.stdout.write("Sync done.\n");
-    } catch (e) {
-      process.stdout.write(`Sync warning: ${e?.message || e}\n`);
-    }
-  }
 
   // Resolve paths
   const queuePath = resolveQueuePath();
@@ -232,6 +215,26 @@ async function cmdServe(argv) {
 
     if (opts.open) {
       openInBrowser(url);
+    }
+  }
+
+  // A large Windows runtime copy can take tens of seconds. Health probes and
+  // the dashboard must already work while maintenance is in progress.
+  try {
+    const { installLocalTrackerApp } = require("./init");
+    await installLocalTrackerApp({ appDir: path.join(trackerDir, "app") });
+  } catch (e) {
+    process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
+  }
+
+  if (opts.sync && !needsFirstRunSetup) {
+    process.stdout.write("Syncing local data...\n");
+    try {
+      const { cmdSync } = require("./sync");
+      await cmdSync(["--auto"]);
+      process.stdout.write("Sync done.\n");
+    } catch (e) {
+      process.stdout.write(`Sync warning: ${e?.message || e}\n`);
     }
   }
 
@@ -761,7 +764,7 @@ function parseArgs(argv, env = process.env) {
     port: envPort || defaultPort,
     portExplicit: Boolean(envPort),
     wslDefaultPort: !envPort && defaultPort === WSL_DEFAULT_PORT,
-    open: true,
+    open: !["macos", "windows", "linux"].includes(env.TOKENTRACKER_APP_SHELL),
     sync: true,
   };
   for (let i = 0; i < argv.length; i++) {

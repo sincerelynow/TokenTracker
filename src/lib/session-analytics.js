@@ -102,8 +102,10 @@ const {
 // v27 discovers compressed Codex archives while preserving ordered root ownership.
 // v28 adds Ultrafast subsets and oh-my-pi sessions while retaining Codex root identity.
 // v29 records per-minute Claude/Grok usage and Claude backend provenance.
-const SIDECAR_VERSION = 29;
-// Invalidate Codex token summaries independently.
+// v30 adds DSH request timing and first-response samples, excluding failed v1 retries.
+// Rebuild older sidecars because they lack timings or counted failed retries.
+const SIDECAR_VERSION = 30;
+// Invalidate only Codex token summaries; other sources keep their cached rows.
 const CODEX_USAGE_VERSION = 1;
 const EDIT_TOOLS = new Set([
   "apply_patch",

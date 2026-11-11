@@ -295,7 +295,7 @@ test("nonzero unknown Claude usage remains in model totals and partial cost", as
 });
 
 
-for (const version of [14, 15, 16, 17, 24, 25, 26, 27, 28]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
+for (const version of [14, 15, 16, 17, 24, 25, 26, 27, 28, 29]) test(`version ${version} sidecars rebuild root identity, storage and request performance before cache reuse`, async (t) => {
   const rows = [context(0), output(5, "function_call"), count(10, usage(300))];
   const { home } = fixture(t, rows, "codex");
   const tracker = path.join(home, ".tokentracker/tracker");
@@ -317,7 +317,7 @@ for (const version of [14, 15, 16, 17, 24, 25, 26, 27, 28]) test(`version ${vers
   meta.version = version;
   fs.writeFileSync(metaPath, JSON.stringify(meta));
   const rebuilt = (await buildSessionAnalytics({ home }))[0];
-  assert.equal(rebuilt.version, 29);
+  assert.equal(rebuilt.version, 30);
   assert.equal(rebuilt.session_store_bytes, cold.session_store_bytes);
   assert.ok(rebuilt.session_store_bytes > 0);
   assert.equal(rebuilt.source, "codex");
@@ -326,7 +326,7 @@ for (const version of [14, 15, 16, 17, 24, 25, 26, 27, 28]) test(`version ${vers
   assert.deepEqual(rebuilt.performance, cold.performance);
   assert.ok(rebuilt.performance.estimated_tokens_per_second > 0);
   assert.deepEqual(rebuilt.model_usage[0].performance, cold.model_usage[0].performance);
-  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 29);
+  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 30);
 });
 
 test("ZCode collector converts per-request durations and first-token samples", () => {
